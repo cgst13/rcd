@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.DS_Store
+*.log
+
+# Server specific
+server/node_modules/
+server/.env
+server/credentials.json
+
+# Client specific (redundant if client/.gitignore exists but good for safety)
+client/node_modules/
+client/dist/
+client/.env
