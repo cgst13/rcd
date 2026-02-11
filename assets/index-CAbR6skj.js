@@ -453,7 +453,7 @@ export default theme;`}function S0(t){return typeof t=="number"?`${(t*100).toFix
                 </thead>
                 <tbody>
                     <!-- Filler rows -->
-                    ${Array(12).fill(0).map(()=>`
+                    ${Array(10).fill(0).map(()=>`
                     <tr><td>&nbsp;</td><td></td><td></td></tr> 
                     `).join("")}
                     
@@ -887,7 +887,7 @@ export default theme;`}function S0(t){return typeof t=="number"?`${(t*100).toFix
                     </tr> 
                 </thead>
                 <tbody>
-                    ${Array(12).fill(0).map(()=>`
+                    ${Array(10).fill(0).map(()=>`
                     <tr><td>&nbsp;</td><td></td><td></td></tr> 
                     `).join("")}
                     <tr> 
