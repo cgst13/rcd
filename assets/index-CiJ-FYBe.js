@@ -1132,7 +1132,7 @@ export default theme;`}function zb(e){return typeof e=="number"?`${(e*100).toFix
                     <tr> 
                         <td class="left">Cash in Local Treasury</td> 
                         <td class="center">1-01-01-010</td> 
-                        <td class="right">${bt?"":`₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}`}</td> 
+                        <td class="right">₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}</td> 
                         <td class="right"></td> 
                     </tr>
                     ${bt?`
