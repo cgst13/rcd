@@ -1130,9 +1130,9 @@ export default theme;`}function zb(e){return typeof e=="number"?`${(e*100).toFix
                 </thead>
                 <tbody>
                     <tr> 
-                        <td class="left">${bt?"Cash in Local Treasury":"&nbsp;"}</td> 
-                        <td class="center">${bt?"1-01-01-010":""}</td> 
-                        <td class="right">${bt?`₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}`:""}</td> 
+                        <td class="left">Cash in Local Treasury</td> 
+                        <td class="center">1-01-01-010</td> 
+                        <td class="right">${bt?"":`₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}`}</td> 
                         <td class="right"></td> 
                     </tr>
                     ${bt?`
@@ -1156,10 +1156,10 @@ export default theme;`}function zb(e){return typeof e=="number"?`${(e*100).toFix
                     </tr>
                     `:`
                     <tr> 
-                        <td class="left">Cash in Local Treasury</td> 
-                        <td class="center">1-01-01-010</td> 
-                        <td class="right">₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}</td> 
+                        <td class="left">Special Education Tax</td> 
+                        <td class="center">4-01-02-050</td> 
                         <td class="right"></td> 
+                        <td class="right">₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}</td> 
                     </tr>
                     `}
                     ${Array(bt?18:20).fill(0).map(()=>"<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>").join("")}
