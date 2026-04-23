@@ -1156,21 +1156,9 @@ export default theme;`}function zb(e){return typeof e=="number"?`${(e*100).toFix
                     </tr>
                     `:`
                     <tr> 
-                        <td class="left">&nbsp;</td> 
-                        <td class="center"></td> 
-                        <td class="right"></td> 
-                        <td class="right"></td> 
-                    </tr>
-                    <tr> 
-                        <td class="left">&nbsp;</td> 
-                        <td class="center"></td> 
-                        <td class="right"></td> 
-                        <td class="right"></td> 
-                    </tr>
-                    <tr> 
-                        <td class="left">&nbsp;</td> 
-                        <td class="center"></td> 
-                        <td class="right"></td> 
+                        <td class="left">Cash in Local Treasury</td> 
+                        <td class="center">1-01-01-010</td> 
+                        <td class="right">₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}</td> 
                         <td class="right"></td> 
                     </tr>
                     `}
