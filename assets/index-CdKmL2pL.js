@@ -1155,14 +1155,8 @@ export default theme;`}function zb(e){return typeof e=="number"?`${(e*100).toFix
                         <td class="right"></td> 
                     </tr>
                     `:`
-                    <tr> 
-                        <td class="left">Special Education Tax</td> 
-                        <td class="center">4-01-02-050</td> 
-                        <td class="right"></td> 
-                        <td class="right">₱ ${Je.toLocaleString("en-PH",{minimumFractionDigits:2})}</td> 
-                    </tr>
                     `}
-                    ${Array(bt?18:20).fill(0).map(()=>"<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>").join("")}
+                    ${Array(bt?18:21).fill(0).map(()=>"<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>").join("")}
                 </tbody>
             </table> 
             <div class="spacer"></div>
