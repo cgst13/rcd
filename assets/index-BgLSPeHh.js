@@ -1137,6 +1137,18 @@ export default theme;`}function $b(e){return typeof e=="number"?`${(e*100).toFix
                     </tr>
                     ${At?`
                     <tr> 
+                        <td class="left" style="padding-left: 20px;">Due to LGUs Barangay</td> 
+                        <td class="center">2-02-01-070</td> 
+                        <td class="right"></td> 
+                        <td class="right"></td> 
+                    </tr>
+                    <tr> 
+                        <td class="left" style="padding-left: 20px;">Due to LGUs Province</td> 
+                        <td class="center">2-02-01-070</td> 
+                        <td class="right"></td> 
+                        <td class="right"></td> 
+                    </tr>
+                    <tr> 
                         <td class="left">Real Property Tax-Basic</td> 
                         <td class="center">4-01-02-040</td> 
                         <td class="right"></td> 
@@ -1156,7 +1168,7 @@ export default theme;`}function $b(e){return typeof e=="number"?`${(e*100).toFix
                     </tr>
                     `:`
                     `}
-                    ${Array(At?18:21).fill(0).map(()=>"<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>").join("")}
+                    ${Array(At?16:21).fill(0).map(()=>"<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>").join("")}
                 </tbody>
             </table> 
             <div class="spacer"></div>
