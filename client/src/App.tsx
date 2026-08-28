@@ -52,6 +52,31 @@ const PublicRoute = ({ children }: { children: React.ReactElement }) => {
   return children;
 };
 
+// Admin Only Route
+const AdminRoute = ({ children }: { children: React.ReactElement }) => {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!isAdmin) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return children;
+};
+
 function AppRoutes() {
   return (
     <Routes>
@@ -71,9 +96,17 @@ function AppRoutes() {
         <Route path="/collection" element={<CollectionReportPage />} />
         <Route path="/account-codes" element={<AccountCodesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/signatories" element={<SignatoriesPage />} />
+        <Route path="/signatories" element={
+          <AdminRoute>
+            <SignatoriesPage />
+          </AdminRoute>
+        } />
         <Route path="/rpt-collection" element={<RPTCollectionPage />} />
-        <Route path="/users" element={<UsersPage />} />
+        <Route path="/users" element={
+          <AdminRoute>
+            <UsersPage />
+          </AdminRoute>
+        } />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

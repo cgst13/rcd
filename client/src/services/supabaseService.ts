@@ -264,12 +264,18 @@ export const deleteAccountCode = async (id: number): Promise<boolean> => {
 // 3. SIGNATORIES (Table: rcd_signatories)
 // ============================================================================
 
+export interface CollectorSignatoryProfile {
+  accountableName: string;
+  position: string;
+  department: string;
+}
+
 export const getSignatories = async (): Promise<Signatory[]> => {
   let globalSignatories: Signatory[] = [
-    { id: 1, fullName: 'MENARD A. HERRERA', position: 'Revenue Collection Clerk II', department: 'Office of the Municipal Treasurer', remarks: "Treasurer's Office Staff / Certification" },
-    { id: 2, fullName: 'MARIA SANTOS, CPA', position: 'Municipal Treasurer', department: 'Office of the Municipal Treasurer', remarks: 'Municipal Treasurer / Verification & Acknowledgment' },
-    { id: 3, fullName: 'HESTHER F. FANOGA', position: 'AA II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
-    { id: 4, fullName: 'PEDRO REYES', position: 'Municipal Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
+    { id: 1, fullName: 'ACCOUNTABLE OFFICER', position: 'Revenue Collection Clerk I', department: 'Office of the Municipal Treasurer', remarks: "Treasurer's Office Staff / Certification" },
+    { id: 2, fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer', department: 'Office of the Municipal Treasurer', remarks: 'Municipal Treasurer / Verification & Acknowledgment' },
+    { id: 3, fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
+    { id: 4, fullName: 'HESTHER F. FANOGA', position: 'AA II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
   ];
 
   if (isSupabaseConfigured()) {
@@ -321,7 +327,7 @@ export const getSignatories = async (): Promise<Signatory[]> => {
         } else if (user.user_metadata?.full_name) {
           // If no custom signatory saved yet, default Certification name to user's name
           const certIdx = globalSignatories.findIndex(s => s.id === 1 || s.remarks?.toLowerCase().includes('certification'));
-          if (certIdx >= 0 && !globalSignatories[certIdx].fullName.includes(user.user_metadata.full_name.toUpperCase())) {
+          if (certIdx >= 0) {
             globalSignatories[certIdx] = {
               ...globalSignatories[certIdx],
               fullName: user.user_metadata.full_name.toUpperCase(),
@@ -365,6 +371,122 @@ export const getSignatories = async (): Promise<Signatory[]> => {
   }
 
   return globalSignatories;
+};
+
+export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatoryProfile> => {
+  let defaultProfile: CollectorSignatoryProfile = {
+    accountableName: '',
+    position: 'Revenue Collection Clerk I',
+    department: 'Office of the Municipal Treasurer'
+  };
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        defaultProfile.accountableName = user.user_metadata?.full_name || '';
+        const { data, error } = await supabase
+          .from('rcd_signatories')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('id', { ascending: false })
+          .limit(1);
+
+        if (!error && data && data.length > 0) {
+          return {
+            accountableName: data[0].full_name || defaultProfile.accountableName,
+            position: data[0].position || defaultProfile.position,
+            department: data[0].department || defaultProfile.department,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching collector signatory profile from Supabase:', e);
+    }
+  }
+
+  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
+  let currentUserId = 'default';
+  if (currentUserStr) {
+    try {
+      const u = JSON.parse(currentUserStr);
+      currentUserId = u.id || u.email || 'default';
+      defaultProfile.accountableName = u.name || '';
+    } catch {}
+  }
+  const userCertStored = localStorage.getItem(`user_cert_signatory_${currentUserId}`);
+  if (userCertStored) {
+    try {
+      const cert = JSON.parse(userCertStored);
+      return {
+        accountableName: cert.fullName || defaultProfile.accountableName,
+        position: cert.position || defaultProfile.position,
+        department: cert.department || defaultProfile.department,
+      };
+    } catch {}
+  }
+
+  return defaultProfile;
+};
+
+export const saveCollectorSignatoryProfile = async (profile: CollectorSignatoryProfile): Promise<boolean> => {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: existing } = await supabase
+        .from('rcd_signatories')
+        .select('id')
+        .eq('user_id', user.id)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        const { error } = await supabase
+          .from('rcd_signatories')
+          .update({
+            full_name: profile.accountableName.toUpperCase(),
+            position: profile.position,
+            department: profile.department,
+            remarks: "Treasurer's Office Staff / Certification",
+          })
+          .eq('id', existing[0].id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('rcd_signatories')
+          .insert({
+            user_id: user.id,
+            full_name: profile.accountableName.toUpperCase(),
+            position: profile.position,
+            department: profile.department,
+            remarks: "Treasurer's Office Staff / Certification",
+          });
+        if (error) throw error;
+      }
+      return true;
+    } catch (e) {
+      console.error('Error saving collector signatory profile to Supabase:', e);
+    }
+  }
+
+  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
+  let currentUserId = 'default';
+  if (currentUserStr) {
+    try {
+      const u = JSON.parse(currentUserStr);
+      currentUserId = u.id || u.email || 'default';
+    } catch {}
+  }
+  const signatoryObj: Signatory = {
+    id: 1,
+    fullName: profile.accountableName.toUpperCase(),
+    position: profile.position,
+    department: profile.department,
+    remarks: "Treasurer's Office Staff / Certification"
+  };
+  localStorage.setItem(`user_cert_signatory_${currentUserId}`, JSON.stringify(signatoryObj));
+  return true;
 };
 
 export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {

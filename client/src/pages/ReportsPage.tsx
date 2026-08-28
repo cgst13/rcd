@@ -810,40 +810,33 @@ export const ReportsPage: React.FC = () => {
     const amountInWords = numberToWords(totalAmount);
 
     // Dynamic Signatories (Exact 4 Official Roles)
-    // 1. CERTIFICATION: Treasurer's Office, Staff
+    // 1. CERTIFICATION: Collector / Accountable Officer
     const collector = signatories.find(s => 
-      s.department.toLowerCase().includes('treasurer') && 
-      (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('clerk') || s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('aide'))
+      s.remarks?.toLowerCase().includes('certification') || 
+      (s.department.toLowerCase().includes('treasurer') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('clerk') || s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('aide')))
     ) || signatories.find(s => 
-      s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.remarks?.toLowerCase().includes('certification')
-    ) || signatories.find(s => 
-      s.position.toLowerCase().includes('treasurer')
-    ) || { fullName: 'MARIA SANTOS, CPA', position: 'Revenue Collection Clerk II' };
+      s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('officer')
+    ) || { fullName: (signatories[0]?.fullName && signatories[0]?.fullName !== 'MENARD A. HERRERA' ? signatories[0].fullName : 'ACCOUNTABLE OFFICER'), position: 'Revenue Collection Clerk I' };
 
     // 2. VERIFICATION AND ACKNOWLEDGMENT: Municipal Treasurer
     const treasurer = signatories.find(s => 
       s.position.toLowerCase() === 'municipal treasurer' || 
       (s.position.toLowerCase().includes('treasurer') && !s.position.toLowerCase().includes('staff') && !s.position.toLowerCase().includes('clerk'))
-    ) || signatories.find(s => s.remarks?.toLowerCase().includes('verification') || s.remarks?.toLowerCase().includes('acknowledgment')) || { fullName: 'MARIA SANTOS, CPA', position: 'Municipal Treasurer' };
+    ) || signatories.find(s => s.remarks?.toLowerCase().includes('verification') || s.remarks?.toLowerCase().includes('acknowledgment')) || { fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer' };
 
     // 3. Prepared by: Accounting Staff
     const preparer = signatories.find(s =>
-      (s.department.toLowerCase().includes('account') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('aide') || s.position.toLowerCase().includes('aa') || s.position.toLowerCase().includes('clerk'))) ||
-      s.position.toLowerCase().includes('aa') ||
-      s.position.toLowerCase().includes('aide') ||
-      s.position.toLowerCase().includes('preparer') ||
       s.remarks?.toLowerCase().includes('prepared') ||
+      (s.department.toLowerCase().includes('account') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('aide') || s.position.toLowerCase().includes('aa') || s.position.toLowerCase().includes('clerk'))) ||
       s.fullName.toLowerCase().includes('fanoga')
     ) || { fullName: 'HESTHER F. FANOGA', position: 'AA II' };
 
     // 4. Certified Correct: Accountant
     const accountant = signatories.find(s =>
-      s.position.toLowerCase() === 'municipal accountant' ||
-      s.position.toLowerCase() === 'accountant' ||
-      (s.position.toLowerCase().includes('accountant') && !s.position.toLowerCase().includes('aide') && !s.position.toLowerCase().includes('staff')) ||
       s.remarks?.toLowerCase().includes('certified') ||
-      s.fullName.toLowerCase().includes('reyes')
-    ) || { fullName: 'PEDRO REYES', position: 'Municipal Accountant' };
+      s.position.toLowerCase() === 'municipal accountant' ||
+      s.fullName.toLowerCase().includes('paz')
+    ) || { fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant' };
 
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -1641,40 +1634,33 @@ export const ReportsPage: React.FC = () => {
     const amountInWords = numberToWords(totalAmount);
 
     // Dynamic Signatories (Exact 4 Official Roles)
-    // 1. CERTIFICATION: Treasurer's Office, Staff
+    // 1. CERTIFICATION: Collector / Accountable Officer
     const collector = signatories.find(s => 
-      s.department.toLowerCase().includes('treasurer') && 
-      (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('clerk') || s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('aide'))
+      s.remarks?.toLowerCase().includes('certification') || 
+      (s.department.toLowerCase().includes('treasurer') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('clerk') || s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('aide')))
     ) || signatories.find(s => 
-      s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.remarks?.toLowerCase().includes('certification')
-    ) || signatories.find(s => 
-      s.position.toLowerCase().includes('treasurer')
-    ) || { fullName: 'MARIA SANTOS, CPA', position: 'Revenue Collection Clerk II' };
+      s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('officer')
+    ) || { fullName: (signatories[0]?.fullName && signatories[0]?.fullName !== 'MENARD A. HERRERA' ? signatories[0].fullName : 'ACCOUNTABLE OFFICER'), position: 'Revenue Collection Clerk I' };
 
     // 2. VERIFICATION AND ACKNOWLEDGMENT: Municipal Treasurer
     const treasurer = signatories.find(s => 
       s.position.toLowerCase() === 'municipal treasurer' || 
       (s.position.toLowerCase().includes('treasurer') && !s.position.toLowerCase().includes('staff') && !s.position.toLowerCase().includes('clerk'))
-    ) || signatories.find(s => s.remarks?.toLowerCase().includes('verification') || s.remarks?.toLowerCase().includes('acknowledgment')) || { fullName: 'MARIA SANTOS, CPA', position: 'Municipal Treasurer' };
+    ) || signatories.find(s => s.remarks?.toLowerCase().includes('verification') || s.remarks?.toLowerCase().includes('acknowledgment')) || { fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer' };
 
     // 3. Prepared by: Accounting Staff
     const preparer = signatories.find(s =>
-      (s.department.toLowerCase().includes('account') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('aide') || s.position.toLowerCase().includes('aa') || s.position.toLowerCase().includes('clerk'))) ||
-      s.position.toLowerCase().includes('aa') ||
-      s.position.toLowerCase().includes('aide') ||
-      s.position.toLowerCase().includes('preparer') ||
       s.remarks?.toLowerCase().includes('prepared') ||
+      (s.department.toLowerCase().includes('account') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('aide') || s.position.toLowerCase().includes('aa') || s.position.toLowerCase().includes('clerk'))) ||
       s.fullName.toLowerCase().includes('fanoga')
     ) || { fullName: 'HESTHER F. FANOGA', position: 'AA II' };
 
     // 4. Certified Correct: Accountant
     const accountant = signatories.find(s =>
-      s.position.toLowerCase() === 'municipal accountant' ||
-      s.position.toLowerCase() === 'accountant' ||
-      (s.position.toLowerCase().includes('accountant') && !s.position.toLowerCase().includes('aide') && !s.position.toLowerCase().includes('staff')) ||
       s.remarks?.toLowerCase().includes('certified') ||
-      s.fullName.toLowerCase().includes('reyes')
-    ) || { fullName: 'PEDRO REYES', position: 'Municipal Accountant' };
+      s.position.toLowerCase() === 'municipal accountant' ||
+      s.fullName.toLowerCase().includes('paz')
+    ) || { fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant' };
 
     // Calculate OR Ranges for Section A.1 and Section C (50 ORs/Booklet)
     interface RptRangeItem {

@@ -396,29 +396,31 @@ export const Layout: React.FC = () => {
                   </ListItemButton>
                 </ListItem>
 
-                <ListItem disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    selected={isRouteActive('/signatories')}
-                    onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.5,
-                      color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
-                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b' }}>
-                      <People fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="Signatories" 
-                      primaryTypographyProps={{ fontWeight: isRouteActive('/signatories') ? 700 : 500, fontSize: '0.84rem' }} 
-                    />
-                  </ListItemButton>
-                </ListItem>
+                {isAdmin && (
+                  <ListItem disablePadding sx={{ mb: 0.5 }}>
+                    <ListItemButton
+                      selected={isRouteActive('/signatories')}
+                      onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
+                      sx={{
+                        borderRadius: 1,
+                        py: 0.8,
+                        px: 1.5,
+                        color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
+                        bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
+                        border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
+                        '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b' }}>
+                        <People fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary="Signatories" 
+                        primaryTypographyProps={{ fontWeight: isRouteActive('/signatories') ? 700 : 500, fontSize: '0.84rem' }} 
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                )}
 
                 {isAdmin && (
                   <ListItem disablePadding sx={{ mb: 0.5 }}>
@@ -496,27 +498,29 @@ export const Layout: React.FC = () => {
               </Tooltip>
             </ListItem>
 
-            <ListItem disablePadding sx={{ mb: 0.5 }}>
-              <Tooltip title="Signatories" placement="right" arrow>
-                <ListItemButton
-                  selected={isRouteActive('/signatories')}
-                  onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
-                  sx={{
-                    borderRadius: 1,
-                    py: 0.8,
-                    px: 1.2,
-                    justifyContent: 'center',
-                    color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
-                    bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
-                    border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                    <People />
-                  </ListItemIcon>
-                </ListItemButton>
-              </Tooltip>
-            </ListItem>
+            {isAdmin && (
+              <ListItem disablePadding sx={{ mb: 0.5 }}>
+                <Tooltip title="Signatories" placement="right" arrow>
+                  <ListItemButton
+                    selected={isRouteActive('/signatories')}
+                    onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.2,
+                      justifyContent: 'center',
+                      color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                      <People />
+                    </ListItemIcon>
+                  </ListItemButton>
+                </Tooltip>
+              </ListItem>
+            )}
 
             {isAdmin && (
               <ListItem disablePadding sx={{ mb: 0.5 }}>

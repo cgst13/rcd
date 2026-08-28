@@ -350,8 +350,7 @@ insert into public.rcd_account_codes (user_id, main_category, sub_category, code
 on conflict do nothing;
 
 insert into public.rcd_signatories (user_id, full_name, position, department, remarks) values
-  (null, 'MENARD A. HERRERA', 'Revenue Collection Clerk II', 'Office of the Municipal Treasurer', 'Treasurer''s Office Staff / Certification'),
-  (null, 'MARIA SANTOS, CPA', 'Municipal Treasurer', 'Office of the Municipal Treasurer', 'Municipal Treasurer / Verification & Acknowledgment'),
-  (null, 'HESTHER F. FANOGA', 'AA II', 'Office of the Municipal Accountant', 'Accounting Staff / Prepared by'),
-  (null, 'PEDRO REYES', 'Municipal Accountant', 'Office of the Municipal Accountant', 'Municipal Accountant / Certified Correct')
+  (null, 'MENARD A. HERRERA', 'Municipal Treasurer', 'Office of the Municipal Treasurer', 'Municipal Treasurer / Verification & Acknowledgment'),
+  (null, 'LEON F. PAZ, JR.', 'Municipal Accountant', 'Office of the Municipal Accountant', 'Municipal Accountant / Certified Correct'),
+  (null, 'HESTHER F. FANOGA', 'AA II', 'Office of the Municipal Accountant', 'Accounting Staff / Prepared by')
 on conflict do nothing;
