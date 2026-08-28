@@ -260,6 +260,64 @@ export const deleteAccountCode = async (id: number): Promise<boolean> => {
   return true;
 };
 
+export const importAccountCodes = async (
+  codes: { mainCategory: string; subCategory: string; code: string }[],
+  replaceExisting: boolean = false
+): Promise<{ success: boolean; count: number }> => {
+  if (!codes || codes.length === 0) return { success: false, count: 0 };
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id || null;
+
+      if (replaceExisting) {
+        // Delete all existing codes
+        await supabase.from('rcd_account_codes').delete().neq('id', 0);
+      }
+
+      // Format payload for batch insert
+      const rowsToInsert = codes.map(c => ({
+        user_id: userId,
+        main_category: c.mainCategory.trim() || 'General Revenue',
+        sub_category: c.subCategory.trim(),
+        code: c.code.trim(),
+      }));
+
+      // Insert in chunks of 50 to respect payload limits
+      const chunkSize = 50;
+      for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
+        const chunk = rowsToInsert.slice(i, i + chunkSize);
+        const { error } = await supabase.from('rcd_account_codes').insert(chunk);
+        if (error) {
+          console.error('Error inserting chunk of account codes:', error);
+        }
+      }
+
+      return { success: true, count: codes.length };
+    } catch (e) {
+      console.error('Error importing account codes to Supabase:', e);
+    }
+  }
+
+  // LocalStorage Fallback
+  const currentCodes = replaceExisting ? [] : await getAccountCodes();
+  let nextId = currentCodes.length > 0 ? Math.max(...currentCodes.map(c => c.id)) + 1 : 1;
+
+  const newCodes: AccountCode[] = [...currentCodes];
+  for (const c of codes) {
+    newCodes.push({
+      id: nextId++,
+      mainCategory: c.mainCategory.trim() || 'General Revenue',
+      subCategory: c.subCategory.trim(),
+      code: c.code.trim(),
+    });
+  }
+
+  localStorage.setItem('account_codes', JSON.stringify(newCodes));
+  return { success: true, count: codes.length };
+};
+
 // ============================================================================
 // 3. SIGNATORIES (Table: rcd_signatories)
 // ============================================================================
