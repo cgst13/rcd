@@ -27,7 +27,11 @@ import {
   Radio,
   FormControl,
   FormLabel,
-  Button
+  Button,
+  Select,
+  MenuItem,
+  InputLabel,
+  Alert
 } from '@mui/material';
 import { 
   Add, 
@@ -68,6 +72,9 @@ export const AccountCodesPage: React.FC = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importedRows, setImportedRows] = useState<{ mainCategory: string; subCategory: string; code: string }[]>([]);
   const [importFileName, setImportFileName] = useState('');
+  const [workbookState, setWorkbookState] = useState<XLSX.WorkBook | null>(null);
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState<string>('');
   const [replaceMode, setReplaceMode] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -244,6 +251,67 @@ export const AccountCodesPage: React.FC = () => {
     XLSX.writeFile(wb, 'rcd_account_codes_template.xlsx');
   };
 
+  // Helper to extract account codes from a specific worksheet
+  const parseRowsFromSheet = (workbook: XLSX.WorkBook, sheetName: string) => {
+    try {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) return [];
+      const rawJson: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      const parsed: { mainCategory: string; subCategory: string; code: string }[] = [];
+
+      for (const row of rawJson) {
+        // Normalize matching column headers: Main Category, Sub Category, Account Code
+        const mainCategory = (
+          row['Main Category'] || 
+          row['main category'] || 
+          row['MainCategory'] || 
+          row['Category'] || 
+          row['main_category'] || 
+          row['MAIN CATEGORY'] || 
+          row['Main'] ||
+          ''
+        ).toString().trim();
+
+        const subCategory = (
+          row['Sub Category'] || 
+          row['sub category'] || 
+          row['SubCategory'] || 
+          row['Particulars'] || 
+          row['sub_category'] || 
+          row['Description'] || 
+          row['SUB CATEGORY'] || 
+          row['Sub'] ||
+          ''
+        ).toString().trim();
+
+        const code = (
+          row['Account Code'] || 
+          row['account code'] || 
+          row['AccountCode'] || 
+          row['Code'] || 
+          row['account_code'] || 
+          row['ACCOUNT CODE'] || 
+          row['Acct Code'] ||
+          ''
+        ).toString().trim();
+
+        if (subCategory || code) {
+          parsed.push({
+            mainCategory: mainCategory || 'General Revenue',
+            subCategory: subCategory || '(No Sub Category)',
+            code: code || '(No Code)'
+          });
+        }
+      }
+
+      return parsed;
+    } catch (e) {
+      console.error('Error parsing sheet:', e);
+      return [];
+    }
+  };
+
   const handleTriggerFileInput = () => {
     if (fileInputRef.current) {
       fileInputRef.current.click();
@@ -261,63 +329,22 @@ export const AccountCodesPage: React.FC = () => {
       try {
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rawJson: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-
-        const parsed: { mainCategory: string; subCategory: string; code: string }[] = [];
-
-        for (const row of rawJson) {
-          // Normalize matching column headers: Main Category, Sub Category, Account Code
-          const mainCategory = (
-            row['Main Category'] || 
-            row['main category'] || 
-            row['MainCategory'] || 
-            row['Category'] || 
-            row['main_category'] || 
-            row['MAIN CATEGORY'] || 
-            ''
-          ).toString().trim();
-
-          const subCategory = (
-            row['Sub Category'] || 
-            row['sub category'] || 
-            row['SubCategory'] || 
-            row['Particulars'] || 
-            row['sub_category'] || 
-            row['Description'] || 
-            row['SUB CATEGORY'] || 
-            ''
-          ).toString().trim();
-
-          const code = (
-            row['Account Code'] || 
-            row['account code'] || 
-            row['AccountCode'] || 
-            row['Code'] || 
-            row['account_code'] || 
-            row['ACCOUNT CODE'] || 
-            ''
-          ).toString().trim();
-
-          if (subCategory || code) {
-            parsed.push({
-              mainCategory: mainCategory || 'General Revenue',
-              subCategory: subCategory || '(No Sub Category)',
-              code: code || '(No Code)'
-            });
-          }
-        }
-
-        if (parsed.length === 0) {
+        const sheets = workbook.SheetNames || [];
+        if (sheets.length === 0) {
           setNotification({ 
             open: true, 
-            message: 'No valid rows found in the selected Excel file. Make sure columns are "Main Category", "Sub Category", and "Account Code".', 
-            severity: 'warning' 
+            message: 'No sheets found in the selected Excel file.', 
+            severity: 'error' 
           });
           return;
         }
 
+        setWorkbookState(workbook);
+        setAvailableSheets(sheets);
+        const defaultSheet = sheets[0];
+        setSelectedSheet(defaultSheet);
+
+        const parsed = parseRowsFromSheet(workbook, defaultSheet);
         setImportedRows(parsed);
         setReplaceMode(false);
         setImportDialogOpen(true);
@@ -329,6 +356,14 @@ export const AccountCodesPage: React.FC = () => {
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const handleSheetChange = (newSheet: string) => {
+    setSelectedSheet(newSheet);
+    if (workbookState) {
+      const parsed = parseRowsFromSheet(workbookState, newSheet);
+      setImportedRows(parsed);
+    }
   };
 
   const handleConfirmImport = async () => {
@@ -647,28 +682,79 @@ export const AccountCodesPage: React.FC = () => {
             </Typography>
           </Box>
 
-          {/* Import Mode Radio */}
-          <FormControl component="fieldset" sx={{ mb: 2 }}>
-            <FormLabel component="legend" sx={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>
-              Import Action
-            </FormLabel>
-            <RadioGroup
-              row
-              value={replaceMode ? 'replace' : 'append'}
-              onChange={(e) => setReplaceMode(e.target.value === 'replace')}
-            >
-              <FormControlLabel 
-                value="append" 
-                control={<Radio size="small" />} 
-                label={<Typography variant="body2" fontWeight={600}>Append to existing codes</Typography>} 
-              />
-              <FormControlLabel 
-                value="replace" 
-                control={<Radio size="small" color="error" />} 
-                label={<Typography variant="body2" fontWeight={600} color="error.main">Replace all existing codes</Typography>} 
-              />
-            </RadioGroup>
-          </FormControl>
+          {/* Controls: Sheet Selector & Import Action */}
+          <Grid container spacing={2} sx={{ mb: 2.5, alignItems: 'center' }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="sheet-select-label">Select Excel Sheet / Tab</InputLabel>
+                <Select
+                  labelId="sheet-select-label"
+                  value={selectedSheet}
+                  label="Select Excel Sheet / Tab"
+                  onChange={(e) => handleSheetChange(e.target.value)}
+                  renderValue={(val) => (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <TableChart sx={{ fontSize: 18, color: '#0284c7' }} />
+                      <Typography variant="body2" fontWeight={700}>{val}</Typography>
+                    </Box>
+                  )}
+                >
+                  {availableSheets.map((sheetName) => (
+                    <MenuItem key={sheetName} value={sheetName}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%', justifyContent: 'space-between' }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <TableChart sx={{ fontSize: 18, color: '#0284c7' }} />
+                          <Typography variant="body2" fontWeight={sheetName === selectedSheet ? 700 : 500}>
+                            {sheetName}
+                          </Typography>
+                        </Box>
+                        {sheetName === selectedSheet && (
+                          <Chip label="Selected" size="small" sx={{ fontSize: '0.68rem', height: 18, bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700 }} />
+                        )}
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <FormControl component="fieldset">
+                <FormLabel component="legend" sx={{ fontSize: '0.80rem', fontWeight: 700, color: '#475569' }}>
+                  Import Action
+                </FormLabel>
+                <RadioGroup
+                  row
+                  value={replaceMode ? 'replace' : 'append'}
+                  onChange={(e) => setReplaceMode(e.target.value === 'replace')}
+                >
+                  <FormControlLabel 
+                    value="append" 
+                    control={<Radio size="small" />} 
+                    label={<Typography variant="body2" fontWeight={600}>Append</Typography>} 
+                  />
+                  <FormControlLabel 
+                    value="replace" 
+                    control={<Radio size="small" color="error" />} 
+                    label={<Typography variant="body2" fontWeight={600} color="error.main">Replace all</Typography>} 
+                  />
+                </RadioGroup>
+              </FormControl>
+            </Grid>
+          </Grid>
+
+          {/* Warning if no rows detected on selected sheet */}
+          {importedRows.length === 0 ? (
+            <Alert severity="warning" sx={{ mb: 2, borderRadius: 1.5 }}>
+              No account codes found in sheet "<strong>{selectedSheet}</strong>". Please ensure this sheet has headers: <strong>Main Category</strong>, <strong>Sub Category</strong>, and <strong>Account Code</strong>, or select a different sheet from the dropdown above.
+            </Alert>
+          ) : (
+            <Box sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b' }}>
+                Previewing <strong>{importedRows.length}</strong> codes from sheet "<strong>{selectedSheet}</strong>"
+              </Typography>
+            </Box>
+          )}
 
           {/* Table Preview */}
           <TableContainer sx={{ maxHeight: 320, borderRadius: 1, border: '1px solid #e2e8f0' }}>
