@@ -1,0 +1,789 @@
+import React, { useState } from 'react';
+import { 
+  AppBar, 
+  Box, 
+  CssBaseline, 
+  Drawer, 
+  IconButton, 
+  List, 
+  ListItem, 
+  ListItemButton, 
+  ListItemIcon, 
+  ListItemText, 
+  Toolbar, 
+  Typography, 
+  Avatar, 
+  Chip, 
+  Tooltip, 
+  Divider,
+  Collapse
+} from '@mui/material';
+import { 
+  Menu as MenuIcon, 
+  Dashboard, 
+  Receipt, 
+  Assessment, 
+  Settings, 
+  ListAlt, 
+  Logout, 
+  AccountBalance, 
+  People, 
+  HomeWork,
+  ExpandLess,
+  ExpandMore,
+  ChevronLeft,
+  ChevronRight,
+  ReceiptLong,
+  AdminPanelSettings,
+  SupervisorAccount
+} from '@mui/icons-material';
+import { useNavigate, useLocation, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/useAuth';
+
+const EXPANDED_DRAWER_WIDTH = 260;
+const COLLAPSED_DRAWER_WIDTH = 76;
+
+export const Layout: React.FC = () => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('rcd_sidebar_collapsed') === 'true';
+  });
+
+  // Collapsible sub-menus open states
+  const [collectionsOpen, setCollectionsOpen] = useState(true);
+  const [managementOpen, setManagementOpen] = useState(true);
+
+  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
+  const drawerWidth = isCollapsed ? COLLAPSED_DRAWER_WIDTH : EXPANDED_DRAWER_WIDTH;
+
+  const handleDrawerToggle = () => {
+    setMobileOpen(!mobileOpen);
+  };
+
+  const handleToggleCollapse = () => {
+    const nextState = !isCollapsed;
+    setIsCollapsed(nextState);
+    localStorage.setItem('rcd_sidebar_collapsed', String(nextState));
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
+  const isRouteActive = (path: string) => location.pathname === path;
+
+  const drawerContent = (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', bgcolor: '#ffffff', overflowX: 'hidden' }}>
+      {/* Brand Header */}
+      <Box sx={{ 
+        p: isCollapsed ? 1.5 : 2, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: isCollapsed ? 'center' : 'space-between',
+        gap: 1.5,
+        minHeight: 64
+      }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{ 
+            width: 38, 
+            height: 38, 
+            borderRadius: 1, 
+            bgcolor: '#0284c7', 
+            color: '#ffffff', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <AccountBalance sx={{ fontSize: 22 }} />
+          </Box>
+          {!isCollapsed && (
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0f172a', lineHeight: 1.2, letterSpacing: '-0.2px' }} noWrap>
+                RCD System
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#0284c7', fontWeight: 600, fontSize: '0.72rem' }} noWrap>
+                LGU Concepcion
+              </Typography>
+            </Box>
+          )}
+        </Box>
+
+        {!isCollapsed && (
+          <Tooltip title="Collapse sidebar" placement="left" arrow>
+            <IconButton 
+              size="small" 
+              onClick={handleToggleCollapse} 
+              sx={{ 
+                color: '#64748b', 
+                bgcolor: '#f8fafc',
+                borderRadius: 1,
+                border: '1px solid #e2e8f0',
+                '&:hover': { bgcolor: '#e2e8f0', color: '#0284c7' }
+              }}
+            >
+              <ChevronLeft fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+
+      {isCollapsed && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', pb: 1 }}>
+          <Tooltip title="Expand sidebar" placement="right" arrow>
+            <IconButton 
+              size="small" 
+              onClick={handleToggleCollapse} 
+              sx={{ 
+                color: '#0284c7', 
+                bgcolor: '#f0f9ff',
+                borderRadius: 1,
+                border: '1px solid #bae6fd',
+                '&:hover': { bgcolor: '#e0f2fe' }
+              }}
+            >
+              <ChevronRight fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
+      )}
+
+      <Divider sx={{ borderColor: '#e2e8f0' }} />
+
+      {/* Navigation List */}
+      <List sx={{ px: isCollapsed ? 1 : 1.5, py: 1.5, flex: 1, overflowY: 'auto' }}>
+        
+        {/* 1. Dashboard */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
+          <Tooltip title={isCollapsed ? 'Dashboard' : ''} placement="right" arrow>
+            <ListItemButton
+              selected={isRouteActive('/dashboard')}
+              onClick={() => { navigate('/dashboard'); setMobileOpen(false); }}
+              sx={{
+                borderRadius: 1,
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/dashboard') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/dashboard') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/dashboard') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/dashboard') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <Dashboard />
+              </ListItemIcon>
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="Dashboard" 
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/dashboard') ? 700 : 500, fontSize: '0.88rem' }} 
+                />
+              )}
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
+
+        {/* Section: Collections (Expandable Group) */}
+        {!isCollapsed ? (
+          <Box sx={{ mt: 1.5, mb: 0.5 }}>
+            <ListItemButton
+              onClick={() => setCollectionsOpen(!collectionsOpen)}
+              sx={{
+                py: 0.5,
+                px: 1.5,
+                borderRadius: 1,
+                color: '#64748b',
+                '&:hover': { bgcolor: '#f8fafc', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36, color: '#94a3b8' }}>
+                <ReceiptLong fontSize="small" />
+              </ListItemIcon>
+              <ListItemText 
+                primary="COLLECTIONS" 
+                primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.5px' }} 
+              />
+              {collectionsOpen ? <ExpandLess sx={{ fontSize: 18 }} /> : <ExpandMore sx={{ fontSize: 18 }} />}
+            </ListItemButton>
+
+            <Collapse in={collectionsOpen} timeout="auto" unmountOnExit>
+              <List component="div" disablePadding sx={{ pl: 1 }}>
+                <ListItem disablePadding sx={{ mb: 0.5 }}>
+                  <ListItemButton
+                    selected={isRouteActive('/collection')}
+                    onClick={() => { navigate('/collection'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.5,
+                      color: isRouteActive('/collection') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/collection') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/collection') ? '1px solid #bae6fd' : '1px solid transparent',
+                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/collection') ? '#0284c7' : '#64748b' }}>
+                      <Receipt fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="Collection Report" 
+                      secondary="AF 51 & General"
+                      primaryTypographyProps={{ fontWeight: isRouteActive('/collection') ? 700 : 500, fontSize: '0.84rem' }} 
+                      secondaryTypographyProps={{ fontSize: '0.68rem' }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding sx={{ mb: 0.5 }}>
+                  <ListItemButton
+                    selected={isRouteActive('/rpt-collection')}
+                    onClick={() => { navigate('/rpt-collection'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.5,
+                      color: isRouteActive('/rpt-collection') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/rpt-collection') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/rpt-collection') ? '1px solid #bae6fd' : '1px solid transparent',
+                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/rpt-collection') ? '#0284c7' : '#64748b' }}>
+                      <HomeWork fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="RPT Collection" 
+                      secondary="AF 56 Real Property"
+                      primaryTypographyProps={{ fontWeight: isRouteActive('/rpt-collection') ? 700 : 500, fontSize: '0.84rem' }} 
+                      secondaryTypographyProps={{ fontSize: '0.68rem' }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              </List>
+            </Collapse>
+          </Box>
+        ) : (
+          <>
+            <ListItem disablePadding sx={{ mb: 0.5 }}>
+              <Tooltip title="Collection Report (AF 51)" placement="right" arrow>
+                <ListItemButton
+                  selected={isRouteActive('/collection')}
+                  onClick={() => { navigate('/collection'); setMobileOpen(false); }}
+                  sx={{
+                    borderRadius: 1,
+                    py: 0.8,
+                    px: 1.2,
+                    justifyContent: 'center',
+                    color: isRouteActive('/collection') ? '#0284c7' : '#475569',
+                    bgcolor: isRouteActive('/collection') ? '#f0f9ff' : 'transparent',
+                    border: isRouteActive('/collection') ? '1px solid #bae6fd' : '1px solid transparent',
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/collection') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                    <Receipt />
+                  </ListItemIcon>
+                </ListItemButton>
+              </Tooltip>
+            </ListItem>
+
+            <ListItem disablePadding sx={{ mb: 0.5 }}>
+              <Tooltip title="RPT Collection (AF 56)" placement="right" arrow>
+                <ListItemButton
+                  selected={isRouteActive('/rpt-collection')}
+                  onClick={() => { navigate('/rpt-collection'); setMobileOpen(false); }}
+                  sx={{
+                    borderRadius: 1,
+                    py: 0.8,
+                    px: 1.2,
+                    justifyContent: 'center',
+                    color: isRouteActive('/rpt-collection') ? '#0284c7' : '#475569',
+                    bgcolor: isRouteActive('/rpt-collection') ? '#f0f9ff' : 'transparent',
+                    border: isRouteActive('/rpt-collection') ? '1px solid #bae6fd' : '1px solid transparent',
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/rpt-collection') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                    <HomeWork />
+                  </ListItemIcon>
+                </ListItemButton>
+              </Tooltip>
+            </ListItem>
+          </>
+        )}
+
+        {/* 2. Reports & Summary */}
+        <ListItem disablePadding sx={{ mb: 0.5, mt: isCollapsed ? 0.5 : 1 }}>
+          <Tooltip title={isCollapsed ? 'Reports & Summary (Appendix 34)' : ''} placement="right" arrow>
+            <ListItemButton
+              selected={isRouteActive('/reports')}
+              onClick={() => { navigate('/reports'); setMobileOpen(false); }}
+              sx={{
+                borderRadius: 1,
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/reports') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/reports') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/reports') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/reports') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <Assessment />
+              </ListItemIcon>
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="Reports & Summary" 
+                  secondary="Official Appendix 34"
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/reports') ? 700 : 500, fontSize: '0.88rem' }} 
+                  secondaryTypographyProps={{ fontSize: '0.68rem' }}
+                />
+              )}
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
+
+        {/* Section: Administration / Configuration (Expandable Group) */}
+        {!isCollapsed ? (
+          <Box sx={{ mt: 1.5, mb: 0.5 }}>
+            <ListItemButton
+              onClick={() => setManagementOpen(!managementOpen)}
+              sx={{
+                py: 0.5,
+                px: 1.5,
+                borderRadius: 1,
+                color: '#64748b',
+                '&:hover': { bgcolor: '#f8fafc', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 36, color: '#94a3b8' }}>
+                <AdminPanelSettings fontSize="small" />
+              </ListItemIcon>
+              <ListItemText 
+                primary="MANAGEMENT" 
+                primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.5px' }} 
+              />
+              {managementOpen ? <ExpandLess sx={{ fontSize: 18 }} /> : <ExpandMore sx={{ fontSize: 18 }} />}
+            </ListItemButton>
+
+            <Collapse in={managementOpen} timeout="auto" unmountOnExit>
+              <List component="div" disablePadding sx={{ pl: 1 }}>
+                <ListItem disablePadding sx={{ mb: 0.5 }}>
+                  <ListItemButton
+                    selected={isRouteActive('/account-codes')}
+                    onClick={() => { navigate('/account-codes'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.5,
+                      color: isRouteActive('/account-codes') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/account-codes') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/account-codes') ? '1px solid #bae6fd' : '1px solid transparent',
+                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/account-codes') ? '#0284c7' : '#64748b' }}>
+                      <ListAlt fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="Account Codes" 
+                      primaryTypographyProps={{ fontWeight: isRouteActive('/account-codes') ? 700 : 500, fontSize: '0.84rem' }} 
+                    />
+                  </ListItemButton>
+                </ListItem>
+
+                <ListItem disablePadding sx={{ mb: 0.5 }}>
+                  <ListItemButton
+                    selected={isRouteActive('/signatories')}
+                    onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.5,
+                      color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
+                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b' }}>
+                      <People fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="Signatories" 
+                      primaryTypographyProps={{ fontWeight: isRouteActive('/signatories') ? 700 : 500, fontSize: '0.84rem' }} 
+                    />
+                  </ListItemButton>
+                </ListItem>
+
+                {isAdmin && (
+                  <ListItem disablePadding sx={{ mb: 0.5 }}>
+                    <ListItemButton
+                      selected={isRouteActive('/users')}
+                      onClick={() => { navigate('/users'); setMobileOpen(false); }}
+                      sx={{
+                        borderRadius: 1,
+                        py: 0.8,
+                        px: 1.5,
+                        color: isRouteActive('/users') ? '#0284c7' : '#475569',
+                        bgcolor: isRouteActive('/users') ? '#f0f9ff' : 'transparent',
+                        border: isRouteActive('/users') ? '1px solid #bae6fd' : '1px solid transparent',
+                        '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/users') ? '#0284c7' : '#64748b' }}>
+                        <SupervisorAccount fontSize="small" />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary="Users" 
+                        primaryTypographyProps={{ fontWeight: isRouteActive('/users') ? 700 : 500, fontSize: '0.84rem' }} 
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                )}
+
+                <ListItem disablePadding sx={{ mb: 0.5 }}>
+                  <ListItemButton
+                    selected={isRouteActive('/settings')}
+                    onClick={() => { navigate('/settings'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.5,
+                      color: isRouteActive('/settings') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/settings') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/settings') ? '1px solid #bae6fd' : '1px solid transparent',
+                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/settings') ? '#0284c7' : '#64748b' }}>
+                      <Settings fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="Settings" 
+                      primaryTypographyProps={{ fontWeight: isRouteActive('/settings') ? 700 : 500, fontSize: '0.84rem' }} 
+                    />
+                  </ListItemButton>
+                </ListItem>
+              </List>
+            </Collapse>
+          </Box>
+        ) : (
+          <>
+            <ListItem disablePadding sx={{ mb: 0.5 }}>
+              <Tooltip title="Account Codes" placement="right" arrow>
+                <ListItemButton
+                  selected={isRouteActive('/account-codes')}
+                  onClick={() => { navigate('/account-codes'); setMobileOpen(false); }}
+                  sx={{
+                    borderRadius: 1,
+                    py: 0.8,
+                    px: 1.2,
+                    justifyContent: 'center',
+                    color: isRouteActive('/account-codes') ? '#0284c7' : '#475569',
+                    bgcolor: isRouteActive('/account-codes') ? '#f0f9ff' : 'transparent',
+                    border: isRouteActive('/account-codes') ? '1px solid #bae6fd' : '1px solid transparent',
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/account-codes') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                    <ListAlt />
+                  </ListItemIcon>
+                </ListItemButton>
+              </Tooltip>
+            </ListItem>
+
+            <ListItem disablePadding sx={{ mb: 0.5 }}>
+              <Tooltip title="Signatories" placement="right" arrow>
+                <ListItemButton
+                  selected={isRouteActive('/signatories')}
+                  onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
+                  sx={{
+                    borderRadius: 1,
+                    py: 0.8,
+                    px: 1.2,
+                    justifyContent: 'center',
+                    color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
+                    bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
+                    border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                    <People />
+                  </ListItemIcon>
+                </ListItemButton>
+              </Tooltip>
+            </ListItem>
+
+            {isAdmin && (
+              <ListItem disablePadding sx={{ mb: 0.5 }}>
+                <Tooltip title="Users Management" placement="right" arrow>
+                  <ListItemButton
+                    selected={isRouteActive('/users')}
+                    onClick={() => { navigate('/users'); setMobileOpen(false); }}
+                    sx={{
+                      borderRadius: 1,
+                      py: 0.8,
+                      px: 1.2,
+                      justifyContent: 'center',
+                      color: isRouteActive('/users') ? '#0284c7' : '#475569',
+                      bgcolor: isRouteActive('/users') ? '#f0f9ff' : 'transparent',
+                      border: isRouteActive('/users') ? '1px solid #bae6fd' : '1px solid transparent',
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/users') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                      <SupervisorAccount />
+                    </ListItemIcon>
+                  </ListItemButton>
+                </Tooltip>
+              </ListItem>
+            )}
+
+            <ListItem disablePadding sx={{ mb: 0.5 }}>
+              <Tooltip title="Settings" placement="right" arrow>
+                <ListItemButton
+                  selected={isRouteActive('/settings')}
+                  onClick={() => { navigate('/settings'); setMobileOpen(false); }}
+                  sx={{
+                    borderRadius: 1,
+                    py: 0.8,
+                    px: 1.2,
+                    justifyContent: 'center',
+                    color: isRouteActive('/settings') ? '#0284c7' : '#475569',
+                    bgcolor: isRouteActive('/settings') ? '#f0f9ff' : 'transparent',
+                    border: isRouteActive('/settings') ? '1px solid #bae6fd' : '1px solid transparent',
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/settings') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                    <Settings />
+                  </ListItemIcon>
+                </ListItemButton>
+              </Tooltip>
+            </ListItem>
+          </>
+        )}
+      </List>
+
+      <Divider sx={{ borderColor: '#e2e8f0' }} />
+
+      {/* User Mini Profile in Sidebar Footer */}
+      <Box sx={{ 
+        p: isCollapsed ? 1 : 1.5, 
+        m: isCollapsed ? 1 : 1.5, 
+        bgcolor: '#f8fafc', 
+        borderRadius: 1.5, 
+        border: '1px solid #e2e8f0', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: isCollapsed ? 'center' : 'space-between',
+        gap: 1 
+      }}>
+        <Avatar 
+          sx={{ 
+            width: 34, 
+            height: 34, 
+            bgcolor: isAdmin ? '#0369a1' : '#0284c7', 
+            fontSize: '0.88rem',
+            fontWeight: 700,
+            borderRadius: 1
+          }}
+        >
+          {user?.name?.charAt(0).toUpperCase() || 'U'}
+        </Avatar>
+        
+        {!isCollapsed && (
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="body2" fontWeight="700" noWrap sx={{ fontSize: '0.82rem', color: '#0f172a' }}>
+              {user?.name || 'User'}
+            </Typography>
+            <Chip 
+              label={isAdmin ? 'Administrator' : 'Collector'} 
+              size="small"
+              sx={{ 
+                height: 18, 
+                fontSize: '0.65rem', 
+                fontWeight: 700, 
+                borderRadius: 1,
+                bgcolor: isAdmin ? '#e0f2fe' : '#f1f5f9',
+                color: isAdmin ? '#0284c7' : '#475569',
+                mt: 0.2
+              }} 
+            />
+          </Box>
+        )}
+
+        {!isCollapsed ? (
+          <Tooltip title="Sign Out" arrow>
+            <IconButton color="error" size="small" onClick={handleLogout} sx={{ bgcolor: '#fee2e2', borderRadius: 1, '&:hover': { bgcolor: '#fecaca' } }}>
+              <Logout sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Tooltip>
+        ) : null}
+      </Box>
+    </Box>
+  );
+
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: '#f8fafc' }}>
+      <CssBaseline />
+
+      {/* Top Navbar */}
+      <AppBar
+        position="fixed"
+        sx={{
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          ml: { sm: `${drawerWidth}px` },
+          bgcolor: 'rgba(255, 255, 255, 0.95)',
+          borderBottom: '1px solid #e2e8f0',
+          boxShadow: 'none',
+          color: '#0f172a',
+          transition: 'width 0.25s ease, margin-left 0.25s ease'
+        }}
+      >
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, sm: 3 }, minHeight: 64 }}>
+          {/* Mobile Menu Icon / Breadcrumbs */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Tooltip title="Toggle Menu">
+              <IconButton
+                color="inherit"
+                aria-label="open drawer"
+                edge="start"
+                onClick={handleDrawerToggle}
+                sx={{ display: { sm: 'none' }, color: '#0284c7', borderRadius: 1 }}
+              >
+                <MenuIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+              <IconButton
+                color="inherit"
+                edge="start"
+                onClick={handleToggleCollapse}
+                sx={{ display: { xs: 'none', sm: 'inline-flex' }, color: '#0284c7', bgcolor: '#f0f9ff', borderRadius: 1, border: '1px solid #bae6fd' }}
+              >
+                {isCollapsed ? <ChevronRight fontSize="small" /> : <ChevronLeft fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+
+            <Typography variant="subtitle1" fontWeight="700" sx={{ color: '#0f172a', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Box component="span" sx={{ color: '#64748b', fontWeight: 500, fontSize: '0.85rem' }}>LGU Concepcion</Box>
+              <Box component="span" sx={{ color: '#cbd5e1' }}>/</Box>
+              <Box component="span" sx={{ color: '#0284c7' }}>
+                {location.pathname === '/dashboard' && 'Dashboard'}
+                {location.pathname === '/collection' && 'Collection Report (AF 51)'}
+                {location.pathname === '/rpt-collection' && 'RPT Collection (AF 56)'}
+                {location.pathname === '/reports' && 'Reports & Summaries'}
+                {location.pathname === '/account-codes' && 'Chart of Accounts'}
+                {location.pathname === '/signatories' && 'Authorized Signatories'}
+                {location.pathname === '/settings' && 'Settings'}
+              </Box>
+            </Typography>
+          </Box>
+
+          <Box sx={{ flexGrow: 1 }} />
+
+          {/* Right Action Icons & Badges */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Chip 
+              icon={<AdminPanelSettings sx={{ fontSize: 16 }} />} 
+              label={isAdmin ? 'Admin Mode' : 'Collector Mode'} 
+              size="small"
+              sx={{ 
+                bgcolor: isAdmin ? '#e0f2fe' : '#f0fdf4',
+                color: isAdmin ? '#0284c7' : '#16a34a',
+                border: isAdmin ? '1px solid #bae6fd' : '1px solid #bbf7d0',
+                fontWeight: 700,
+                borderRadius: 1,
+                display: { xs: 'none', md: 'inline-flex' }
+              }}
+            />
+
+            <Tooltip title="Settings">
+              <IconButton 
+                onClick={() => navigate('/settings')} 
+                sx={{ bgcolor: '#f0f9ff', color: '#0284c7', borderRadius: 1 }}
+              >
+                <Settings fontSize="small" />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Sign Out">
+              <IconButton 
+                color="error" 
+                onClick={handleLogout}
+                sx={{ bgcolor: '#fef2f2', borderRadius: 1 }}
+              >
+                <Logout fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Toolbar>
+      </AppBar>
+
+      {/* Navigation Drawer */}
+      <Box
+        component="nav"
+        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 }, transition: 'width 0.25s ease' }}
+      >
+        {/* Mobile Temporary Drawer */}
+        <Drawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={handleDrawerToggle}
+          ModalProps={{ keepMounted: true }}
+          sx={{
+            display: { xs: 'block', sm: 'none' },
+            '& .MuiDrawer-paper': { 
+              boxSizing: 'border-box', 
+              width: EXPANDED_DRAWER_WIDTH,
+              borderRight: '1px solid #e2e8f0',
+              bgcolor: '#ffffff'
+            },
+          }}
+        >
+          {drawerContent}
+        </Drawer>
+
+        {/* Desktop Permanent Drawer */}
+        <Drawer
+          variant="permanent"
+          sx={{
+            display: { xs: 'none', sm: 'block' },
+            '& .MuiDrawer-paper': { 
+              boxSizing: 'border-box', 
+              width: drawerWidth, 
+              borderRight: '1px solid #e2e8f0',
+              bgcolor: '#ffffff',
+              transition: 'width 0.25s ease',
+              overflowX: 'hidden'
+            },
+          }}
+          open
+        >
+          {drawerContent}
+        </Drawer>
+      </Box>
+
+      {/* Main Content Area */}
+      <Box
+        component="main"
+        sx={{ 
+          flexGrow: 1, 
+          p: { xs: 1.5, sm: 2.5, md: 3 }, 
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          maxWidth: '100%',
+          minHeight: '100vh',
+          bgcolor: '#f8fafc',
+          mt: 8,
+          transition: 'width 0.25s ease'
+        }}
+      >
+        <Outlet />
+      </Box>
+    </Box>
+  );
+};
