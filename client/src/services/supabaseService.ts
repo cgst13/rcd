@@ -317,18 +317,50 @@ export interface CollectorSignatoryProfile {
 }
 
 export const getSignatories = async (): Promise<Signatory[]> => {
-  let globalSignatories: Signatory[] = [
-    { id: 1, fullName: 'ACCOUNTABLE OFFICER', position: 'Revenue Collection Clerk I', department: 'Office of the Municipal Treasurer', remarks: "Treasurer's Office Staff / Certification" },
+  // Official municipal signatories defaults
+  let officialMunicipalSignatories: Signatory[] = [
     { id: 2, fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer', department: 'Office of the Municipal Treasurer', remarks: 'Municipal Treasurer / Verification & Acknowledgment' },
     { id: 3, fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
     { id: 4, fullName: 'HESTHER F. FANOGA', position: 'AA II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
   ];
 
+  // Default / fallback collector certification signatory
+  let certSignatory: Signatory = {
+    id: 1,
+    fullName: 'ACCOUNTABLE OFFICER',
+    position: 'Revenue Collection Clerk I',
+    department: 'Office of the Municipal Treasurer',
+    remarks: "Treasurer's Office Staff / Certification"
+  };
+
+  // Check localStorage for logged-in user or cached cert signatory
+  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
+  let currentUserId = 'default';
+  if (currentUserStr) {
+    try {
+      const u = JSON.parse(currentUserStr);
+      currentUserId = u.id || u.email || 'default';
+      if (u.name) certSignatory.fullName = u.name.toUpperCase();
+    } catch {}
+  }
+
+  const userCertStored = localStorage.getItem(`user_cert_signatory_${currentUserId}`) || localStorage.getItem('user_cert_signatory_default');
+  if (userCertStored) {
+    try {
+      const parsed = JSON.parse(userCertStored);
+      if (parsed.fullName || parsed.full_name || parsed.accountableName) {
+        certSignatory.fullName = (parsed.fullName || parsed.full_name || parsed.accountableName).toUpperCase();
+      }
+      if (parsed.position) certSignatory.position = parsed.position;
+      if (parsed.department) certSignatory.department = parsed.department;
+    } catch {}
+  }
+
   if (isSupabaseConfigured()) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
 
-      // 1. Fetch Global official signatories (user_id is null)
+      // 1. Fetch Global official municipal signatories (user_id is null)
       const { data: globalData, error: globalErr } = await supabase
         .from('rcd_signatories')
         .select('*')
@@ -336,7 +368,7 @@ export const getSignatories = async (): Promise<Signatory[]> => {
         .order('id', { ascending: true });
 
       if (!globalErr && globalData && globalData.length > 0) {
-        globalSignatories = globalData.map((row: any) => ({
+        officialMunicipalSignatories = globalData.map((row: any) => ({
           id: row.id,
           fullName: row.full_name,
           position: row.position,
@@ -345,78 +377,45 @@ export const getSignatories = async (): Promise<Signatory[]> => {
         }));
       }
 
-      // 2. If user is logged in, fetch their personal Certification signatory
+      // 2. Fetch Personal Certification Signatory for logged-in collector
       if (user) {
-        const { data: userData } = await supabase
+        if (user.user_metadata?.full_name && certSignatory.fullName === 'ACCOUNTABLE OFFICER') {
+          certSignatory.fullName = user.user_metadata.full_name.toUpperCase();
+        }
+
+        const { data: userData, error: userErr } = await supabase
           .from('rcd_signatories')
           .select('*')
           .eq('user_id', user.id)
           .order('id', { ascending: false })
           .limit(1);
 
-        if (userData && userData.length > 0) {
-          const userCert = userData[0];
-          const certIdx = globalSignatories.findIndex(s => 
-            s.id === 1 || 
-            s.remarks?.toLowerCase().includes('certification') ||
-            (s.department.toLowerCase().includes('treasurer') && !s.position.toLowerCase().includes('municipal treasurer'))
-          );
-          if (certIdx >= 0) {
-            globalSignatories[certIdx] = {
-              id: userCert.id,
-              fullName: userCert.full_name,
-              position: userCert.position,
-              department: userCert.department,
-              remarks: userCert.remarks || "Treasurer's Office Staff / Certification",
-            };
-          }
-        } else if (user.user_metadata?.full_name) {
-          // If no custom signatory saved yet, default Certification name to user's name
-          const certIdx = globalSignatories.findIndex(s => s.id === 1 || s.remarks?.toLowerCase().includes('certification'));
-          if (certIdx >= 0) {
-            globalSignatories[certIdx] = {
-              ...globalSignatories[certIdx],
-              fullName: user.user_metadata.full_name.toUpperCase(),
-            };
-          }
+        if (!userErr && userData && userData.length > 0) {
+          certSignatory = {
+            id: userData[0].id,
+            fullName: (userData[0].full_name || certSignatory.fullName).toUpperCase(),
+            position: userData[0].position || certSignatory.position,
+            department: userData[0].department || certSignatory.department,
+            remarks: userData[0].remarks || "Treasurer's Office Staff / Certification",
+          };
+
+          // Cache in local storage for instant access across tabs/views
+          localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify(certSignatory));
+          localStorage.setItem('user_cert_signatory_default', JSON.stringify(certSignatory));
         }
       }
-
-      return globalSignatories;
     } catch (e) {
       console.warn('Error fetching signatories from Supabase:', e);
     }
   }
 
-  // Fallback to localStorage
-  const stored = localStorage.getItem('signatories');
-  if (stored) {
-    try {
-      globalSignatories = JSON.parse(stored);
-    } catch {}
-  }
+  // Ensure Certification is always index 0, followed by the 3 official municipal roles
+  const filteredOfficials = officialMunicipalSignatories.filter(s => 
+    !s.remarks?.toLowerCase().includes('certification') &&
+    s.position?.toLowerCase() !== 'revenue collection clerk i'
+  );
 
-  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
-  let currentUserId = 'default';
-  if (currentUserStr) {
-    try {
-      const u = JSON.parse(currentUserStr);
-      currentUserId = u.id || u.email || 'default';
-    } catch {}
-  }
-
-  const userCertStored = localStorage.getItem(`user_cert_signatory_${currentUserId}`);
-  if (userCertStored) {
-    try {
-      const userCert = JSON.parse(userCertStored);
-      const certIdx = globalSignatories.findIndex(s => s.id === 1 || s.remarks?.toLowerCase().includes('certification'));
-      if (certIdx >= 0) {
-        globalSignatories[certIdx] = userCert;
-      }
-    } catch {}
-  }
-
-  return globalSignatories;
+  return [certSignatory, ...filteredOfficials];
 };
 
 export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatoryProfile> => {
@@ -426,11 +425,36 @@ export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatory
     department: 'Office of the Municipal Treasurer'
   };
 
+  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
+  let currentUserId = 'default';
+  if (currentUserStr) {
+    try {
+      const u = JSON.parse(currentUserStr);
+      currentUserId = u.id || u.email || 'default';
+      if (u.name) defaultProfile.accountableName = u.name;
+    } catch {}
+  }
+
+  const userCertStored = localStorage.getItem(`user_cert_signatory_${currentUserId}`) || localStorage.getItem('user_cert_signatory_default');
+  if (userCertStored) {
+    try {
+      const cert = JSON.parse(userCertStored);
+      defaultProfile = {
+        accountableName: cert.fullName || cert.full_name || cert.accountableName || defaultProfile.accountableName,
+        position: cert.position || defaultProfile.position,
+        department: cert.department || defaultProfile.department,
+      };
+    } catch {}
+  }
+
   if (isSupabaseConfigured()) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        defaultProfile.accountableName = user.user_metadata?.full_name || '';
+        if (!defaultProfile.accountableName && user.user_metadata?.full_name) {
+          defaultProfile.accountableName = user.user_metadata.full_name;
+        }
+
         const { data, error } = await supabase
           .from('rcd_signatories')
           .select('*')
@@ -439,11 +463,19 @@ export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatory
           .limit(1);
 
         if (!error && data && data.length > 0) {
-          return {
+          const profile = {
             accountableName: data[0].full_name || defaultProfile.accountableName,
             position: data[0].position || defaultProfile.position,
             department: data[0].department || defaultProfile.department,
           };
+          localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify({
+            id: data[0].id,
+            fullName: profile.accountableName.toUpperCase(),
+            position: profile.position,
+            department: profile.department,
+            remarks: "Treasurer's Office Staff / Certification"
+          }));
+          return profile;
         }
       }
     } catch (e) {
@@ -451,70 +483,21 @@ export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatory
     }
   }
 
-  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
-  let currentUserId = 'default';
-  if (currentUserStr) {
-    try {
-      const u = JSON.parse(currentUserStr);
-      currentUserId = u.id || u.email || 'default';
-      defaultProfile.accountableName = u.name || '';
-    } catch {}
-  }
-  const userCertStored = localStorage.getItem(`user_cert_signatory_${currentUserId}`);
-  if (userCertStored) {
-    try {
-      const cert = JSON.parse(userCertStored);
-      return {
-        accountableName: cert.fullName || defaultProfile.accountableName,
-        position: cert.position || defaultProfile.position,
-        department: cert.department || defaultProfile.department,
-      };
-    } catch {}
-  }
-
   return defaultProfile;
 };
 
 export const saveCollectorSignatoryProfile = async (profile: CollectorSignatoryProfile): Promise<boolean> => {
-  if (isSupabaseConfigured()) {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+  const nameToSave = profile.accountableName.trim().toUpperCase();
+  const positionToSave = profile.position?.trim() || 'Revenue Collection Clerk I';
+  const departmentToSave = profile.department?.trim() || 'Office of the Municipal Treasurer';
 
-      const { data: existing } = await supabase
-        .from('rcd_signatories')
-        .select('id')
-        .eq('user_id', user.id)
-        .limit(1);
-
-      if (existing && existing.length > 0) {
-        const { error } = await supabase
-          .from('rcd_signatories')
-          .update({
-            full_name: profile.accountableName.toUpperCase(),
-            position: profile.position,
-            department: profile.department,
-            remarks: "Treasurer's Office Staff / Certification",
-          })
-          .eq('id', existing[0].id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('rcd_signatories')
-          .insert({
-            user_id: user.id,
-            full_name: profile.accountableName.toUpperCase(),
-            position: profile.position,
-            department: profile.department,
-            remarks: "Treasurer's Office Staff / Certification",
-          });
-        if (error) throw error;
-      }
-      return true;
-    } catch (e) {
-      console.error('Error saving collector signatory profile to Supabase:', e);
-    }
-  }
+  const signatoryObj: Signatory = {
+    id: 1,
+    fullName: nameToSave,
+    position: positionToSave,
+    department: departmentToSave,
+    remarks: "Treasurer's Office Staff / Certification"
+  };
 
   const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
   let currentUserId = 'default';
@@ -522,45 +505,33 @@ export const saveCollectorSignatoryProfile = async (profile: CollectorSignatoryP
     try {
       const u = JSON.parse(currentUserStr);
       currentUserId = u.id || u.email || 'default';
+      u.name = nameToSave;
+      localStorage.setItem('rcd_current_user', JSON.stringify(u));
     } catch {}
   }
-  const signatoryObj: Signatory = {
-    id: 1,
-    fullName: profile.accountableName.toUpperCase(),
-    position: profile.position,
-    department: profile.department,
-    remarks: "Treasurer's Office Staff / Certification"
-  };
   localStorage.setItem(`user_cert_signatory_${currentUserId}`, JSON.stringify(signatoryObj));
-  return true;
-};
-
-export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {
-  const isCertification = signatory.id === 1 || 
-    signatory.remarks?.toLowerCase().includes('certification') ||
-    (signatory.department.toLowerCase().includes('treasurer') && !signatory.position.toLowerCase().includes('municipal treasurer'));
+  localStorage.setItem('user_cert_signatory_default', JSON.stringify(signatoryObj));
 
   if (isSupabaseConfigured()) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      if (user) {
+        localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify(signatoryObj));
 
-      if (isCertification) {
-        // Upsert personal Certification signatory for this collector
-        const { data: existing } = await supabase
+        const { data: existing, error: findErr } = await supabase
           .from('rcd_signatories')
           .select('id')
           .eq('user_id', user.id)
           .limit(1);
 
-        if (existing && existing.length > 0) {
+        if (!findErr && existing && existing.length > 0) {
           const { error } = await supabase
             .from('rcd_signatories')
             .update({
-              full_name: signatory.fullName,
-              position: signatory.position,
-              department: signatory.department,
-              remarks: signatory.remarks || "Treasurer's Office Staff / Certification",
+              full_name: nameToSave,
+              position: positionToSave,
+              department: departmentToSave,
+              remarks: "Treasurer's Office Staff / Certification",
             })
             .eq('id', existing[0].id);
           if (error) throw error;
@@ -569,60 +540,68 @@ export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {
             .from('rcd_signatories')
             .insert({
               user_id: user.id,
-              full_name: signatory.fullName,
-              position: signatory.position,
-              department: signatory.department,
-              remarks: signatory.remarks || "Treasurer's Office Staff / Certification",
+              full_name: nameToSave,
+              position: positionToSave,
+              department: departmentToSave,
+              remarks: "Treasurer's Office Staff / Certification",
             });
-          if (error) throw error;
-        }
-        return true;
-      } else {
-        // Global official signatory (Admin only)
-        if (signatory.id && signatory.id > 0) {
-          const { error } = await supabase
-            .from('rcd_signatories')
-            .update({
-              full_name: signatory.fullName,
-              position: signatory.position,
-              department: signatory.department,
-              remarks: signatory.remarks || '',
-            })
-            .eq('id', signatory.id);
           if (error) throw error;
         }
         return true;
       }
     } catch (e) {
-      console.error('Error saving signatory to Supabase:', e);
+      console.error('Error saving collector signatory profile to Supabase:', e);
     }
   }
 
-  // Fallback
-  const currentUserStr = localStorage.getItem('rcd_current_user') || localStorage.getItem('rcd_user');
-  let currentUserId = 'default';
-  if (currentUserStr) {
-    try {
-      const u = JSON.parse(currentUserStr);
-      currentUserId = u.id || u.email || 'default';
-    } catch {}
-  }
+  return true;
+};
+
+export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {
+  const isCertification = signatory.id === 1 || 
+    signatory.remarks?.toLowerCase().includes('certification') ||
+    (signatory.department.toLowerCase().includes('treasurer') && !signatory.position.toLowerCase().includes('municipal treasurer'));
 
   if (isCertification) {
-    localStorage.setItem(`user_cert_signatory_${currentUserId}`, JSON.stringify(signatory));
-  } else {
-    const current = JSON.parse(localStorage.getItem('signatories') || '[]');
-    const index = current.findIndex((s: Signatory) => s.id === signatory.id);
-    let updated;
-    if (index >= 0) {
-      updated = [...current];
-      updated[index] = signatory;
-    } else {
-      const nextId = current.length > 0 ? Math.max(...current.map((s: Signatory) => s.id)) + 1 : 1;
-      updated = [...current, { ...signatory, id: signatory.id || nextId }];
-    }
-    localStorage.setItem('signatories', JSON.stringify(updated));
+    return saveCollectorSignatoryProfile({
+      accountableName: signatory.fullName,
+      position: signatory.position,
+      department: signatory.department
+    });
   }
+
+  if (isSupabaseConfigured()) {
+    try {
+      if (signatory.id && signatory.id > 0) {
+        const { error } = await supabase
+          .from('rcd_signatories')
+          .update({
+            full_name: signatory.fullName,
+            position: signatory.position,
+            department: signatory.department,
+            remarks: signatory.remarks || '',
+          })
+          .eq('id', signatory.id);
+        if (error) throw error;
+      }
+      return true;
+    } catch (e) {
+      console.error('Error saving global signatory to Supabase:', e);
+    }
+  }
+
+  // Fallback to localStorage for global official signatories
+  const current = JSON.parse(localStorage.getItem('signatories') || '[]');
+  const index = current.findIndex((s: Signatory) => s.id === signatory.id);
+  let updated;
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = signatory;
+  } else {
+    const nextId = current.length > 0 ? Math.max(...current.map((s: Signatory) => s.id)) + 1 : 1;
+    updated = [...current, { ...signatory, id: signatory.id || nextId }];
+  }
+  localStorage.setItem('signatories', JSON.stringify(updated));
   return true;
 };
 

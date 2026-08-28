@@ -22,8 +22,10 @@ import {
 import { Download, Clear, Print } from '@mui/icons-material';
 import { getRecentReports, getCollectionEntries, getSignatories, getRPTCollections, type CollectionItem } from '../services/supabaseService';
 import type { RCDReport, Signatory, RPTCollectionItem } from '../types/rcd';
+import { useAuth } from '../context/useAuth';
 
 export const ReportsPage: React.FC = () => {
+  const { user } = useAuth();
   const [, setReports] = useState<RCDReport[]>([]);
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [rptCollections, setRptCollections] = useState<RPTCollectionItem[]>([]);
@@ -811,12 +813,20 @@ export const ReportsPage: React.FC = () => {
 
     // Dynamic Signatories (Exact 4 Official Roles)
     // 1. CERTIFICATION: Collector / Accountable Officer
-    const collector = signatories.find(s => 
+    const collectorCandidate = signatories.find(s => 
       s.remarks?.toLowerCase().includes('certification') || 
-      (s.department.toLowerCase().includes('treasurer') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('clerk') || s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('aide')))
-    ) || signatories.find(s => 
-      s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('officer')
-    ) || { fullName: (signatories[0]?.fullName && signatories[0]?.fullName !== 'MENARD A. HERRERA' ? signatories[0].fullName : 'ACCOUNTABLE OFFICER'), position: 'Revenue Collection Clerk I' };
+      s.position?.toLowerCase().includes('clerk') ||
+      s.position?.toLowerCase().includes('collector') ||
+      s.position?.toLowerCase().includes('rcc') ||
+      (s.department?.toLowerCase().includes('treasurer') && !s.position?.toLowerCase().includes('municipal treasurer'))
+    ) || signatories[0];
+
+    const collector = {
+      fullName: (collectorCandidate?.fullName && collectorCandidate.fullName !== 'ACCOUNTABLE OFFICER' 
+        ? collectorCandidate.fullName 
+        : (user?.name ? user.name.toUpperCase() : 'ACCOUNTABLE OFFICER')),
+      position: collectorCandidate?.position || 'Revenue Collection Clerk I'
+    };
 
     // 2. VERIFICATION AND ACKNOWLEDGMENT: Municipal Treasurer
     const treasurer = signatories.find(s => 
@@ -1635,12 +1645,20 @@ export const ReportsPage: React.FC = () => {
 
     // Dynamic Signatories (Exact 4 Official Roles)
     // 1. CERTIFICATION: Collector / Accountable Officer
-    const collector = signatories.find(s => 
+    const collectorCandidate = signatories.find(s => 
       s.remarks?.toLowerCase().includes('certification') || 
-      (s.department.toLowerCase().includes('treasurer') && (s.position.toLowerCase().includes('staff') || s.position.toLowerCase().includes('clerk') || s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('aide')))
-    ) || signatories.find(s => 
-      s.position.toLowerCase().includes('collector') || s.position.toLowerCase().includes('rcc') || s.position.toLowerCase().includes('officer')
-    ) || { fullName: (signatories[0]?.fullName && signatories[0]?.fullName !== 'MENARD A. HERRERA' ? signatories[0].fullName : 'ACCOUNTABLE OFFICER'), position: 'Revenue Collection Clerk I' };
+      s.position?.toLowerCase().includes('clerk') ||
+      s.position?.toLowerCase().includes('collector') ||
+      s.position?.toLowerCase().includes('rcc') ||
+      (s.department?.toLowerCase().includes('treasurer') && !s.position?.toLowerCase().includes('municipal treasurer'))
+    ) || signatories[0];
+
+    const collector = {
+      fullName: (collectorCandidate?.fullName && collectorCandidate.fullName !== 'ACCOUNTABLE OFFICER' 
+        ? collectorCandidate.fullName 
+        : (user?.name ? user.name.toUpperCase() : 'ACCOUNTABLE OFFICER')),
+      position: collectorCandidate?.position || 'Revenue Collection Clerk I'
+    };
 
     // 2. VERIFICATION AND ACKNOWLEDGMENT: Municipal Treasurer
     const treasurer = signatories.find(s => 
