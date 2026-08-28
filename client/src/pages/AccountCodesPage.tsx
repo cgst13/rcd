@@ -23,16 +23,12 @@ import {
   Tooltip,
   Stack
 } from '@mui/material';
-import { Add, Edit, Delete, Refresh, Clear, Save, ListAlt, Lock } from '@mui/icons-material';
+import { Add, Edit, Delete, Refresh, Clear, Save, ListAlt } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { getAccountCodes, saveAccountCode, deleteAccountCode } from '../services/supabaseService';
-import { useAuth } from '../context/useAuth';
 import type { AccountCode } from '../types/rcd';
 
 export const AccountCodesPage: React.FC = () => {
-  const { user } = useAuth();
-  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
-
   const [accountCodes, setAccountCodes] = useState<AccountCode[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -171,35 +167,25 @@ export const AccountCodesPage: React.FC = () => {
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          {!isAdmin && (
-            <Chip 
-              icon={<Lock sx={{ fontSize: 15 }} />}
-              label="Shared Standard Codes" 
-              size="small" 
-              sx={{ bgcolor: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd', fontWeight: 700 }} 
-            />
-          )}
           <Tooltip title="Refresh Codes" arrow>
             <IconButton color="primary" onClick={loadAccountCodes} disabled={loading}>
               <Refresh />
             </IconButton>
           </Tooltip>
-          {isAdmin && (
-            <Tooltip title="Add Account Code" arrow>
-              <IconButton 
-                color="primary" 
-                onClick={handleOpen}
-                sx={{ 
-                  bgcolor: '#0284c7', 
-                  color: '#ffffff', 
-                  borderRadius: 1,
-                  '&:hover': { bgcolor: '#0369a1', color: '#ffffff' } 
-                }}
-              >
-                <Add />
-              </IconButton>
-            </Tooltip>
-          )}
+          <Tooltip title="Add Account Code" arrow>
+            <IconButton 
+              color="primary" 
+              onClick={handleOpen}
+              sx={{ 
+                bgcolor: '#0284c7', 
+                color: '#ffffff', 
+                borderRadius: 1,
+                '&:hover': { bgcolor: '#0369a1', color: '#ffffff' } 
+              }}
+            >
+              <Add />
+            </IconButton>
+          </Tooltip>
         </Box>
       </Box>
 
@@ -228,7 +214,7 @@ export const AccountCodesPage: React.FC = () => {
                 <TableCell>Sub Category</TableCell>
                 <TableCell>Main Category</TableCell>
                 <TableCell>Account Code</TableCell>
-                {isAdmin && <TableCell align="right">Actions</TableCell>}
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -249,22 +235,20 @@ export const AccountCodesPage: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell sx={{ fontFamily: 'monospace', fontWeight: 700, color: '#0284c7' }}>{row.code}</TableCell>
-                  {isAdmin && (
-                    <TableCell align="right">
-                      <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                        <Tooltip title="Edit Code" arrow>
-                          <IconButton size="small" color="primary" onClick={() => handleEdit(row)}>
-                            <Edit fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="Delete Code" arrow>
-                          <IconButton size="small" color="error" onClick={() => confirmDelete(row.id)}>
-                            <Delete fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Stack>
-                    </TableCell>
-                  )}
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Tooltip title="Edit Code" arrow>
+                        <IconButton size="small" color="primary" onClick={() => handleEdit(row)}>
+                          <Edit fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title="Delete Code" arrow>
+                        <IconButton size="small" color="error" onClick={() => confirmDelete(row.id)}>
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
+                  </TableCell>
                 </TableRow>
               ))}
               {accountCodes.length === 0 && !loading && (

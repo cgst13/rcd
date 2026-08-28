@@ -273,7 +273,7 @@ create policy "Users and Admins delete rpt collections"
   using (auth.uid() = user_id);
 
 -- 5. ACCOUNT CODES POLICIES (rcd_account_codes)
--- All users share the exact same source of account codes; Admins manage codes globally
+-- All users share the exact same source of account codes; Users and Admins can manage codes globally
 drop policy if exists "Users and Admins view account codes" on public.rcd_account_codes;
 drop policy if exists "Users can view account codes" on public.rcd_account_codes;
 create policy "Users and Admins view account codes"
@@ -282,23 +282,26 @@ create policy "Users and Admins view account codes"
 
 drop policy if exists "Users and Admins insert account codes" on public.rcd_account_codes;
 drop policy if exists "Users can insert account codes" on public.rcd_account_codes;
-create policy "Admins insert account codes"
+drop policy if exists "Admins insert account codes" on public.rcd_account_codes;
+create policy "Users and Admins insert account codes"
   on public.rcd_account_codes for insert
-  with check (public.is_admin());
+  with check (true);
 
 drop policy if exists "Users and Admins update account codes" on public.rcd_account_codes;
 drop policy if exists "Users can update account codes" on public.rcd_account_codes;
 drop policy if exists "Users can update their own account codes" on public.rcd_account_codes;
-create policy "Admins update account codes"
+drop policy if exists "Admins update account codes" on public.rcd_account_codes;
+create policy "Users and Admins update account codes"
   on public.rcd_account_codes for update
-  using (public.is_admin());
+  using (true);
 
 drop policy if exists "Users and Admins delete account codes" on public.rcd_account_codes;
 drop policy if exists "Users can delete account codes" on public.rcd_account_codes;
 drop policy if exists "Users can delete their own account codes" on public.rcd_account_codes;
-create policy "Admins delete account codes"
+drop policy if exists "Admins delete account codes" on public.rcd_account_codes;
+create policy "Users and Admins delete account codes"
   on public.rcd_account_codes for delete
-  using (public.is_admin());
+  using (true);
 
 -- 6. SIGNATORIES POLICIES (rcd_signatories)
 -- All users view global officials and their own certification signatory;
