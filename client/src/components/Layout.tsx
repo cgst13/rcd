@@ -15,8 +15,7 @@ import {
   Avatar, 
   Chip, 
   Tooltip, 
-  Divider,
-  Collapse
+  Divider
 } from '@mui/material';
 import { 
   Menu as MenuIcon, 
@@ -29,13 +28,10 @@ import {
   AccountBalance, 
   People, 
   HomeWork,
-  ExpandLess,
-  ExpandMore,
   ChevronLeft,
   ChevronRight,
-  ReceiptLong,
-  AdminPanelSettings,
-  SupervisorAccount
+  SupervisorAccount,
+  AdminPanelSettings
 } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
@@ -52,10 +48,6 @@ export const Layout: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('rcd_sidebar_collapsed') === 'true';
   });
-
-  // Collapsible sub-menus open states
-  const [collectionsOpen, setCollectionsOpen] = useState(true);
-  const [managementOpen, setManagementOpen] = useState(true);
 
   const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
   const drawerWidth = isCollapsed ? COLLAPSED_DRAWER_WIDTH : EXPANDED_DRAWER_WIDTH;
@@ -155,7 +147,7 @@ export const Layout: React.FC = () => {
 
       <Divider sx={{ borderColor: '#e2e8f0' }} />
 
-      {/* Navigation List */}
+      {/* Navigation List (Flat, Non-grouped) */}
       <List sx={{ px: isCollapsed ? 1 : 1.5, py: 1.5, flex: 1, overflowY: 'auto' }}>
         
         {/* 1. Dashboard */}
@@ -188,135 +180,72 @@ export const Layout: React.FC = () => {
           </Tooltip>
         </ListItem>
 
-        {/* Section: Collections (Expandable Group) */}
-        {!isCollapsed ? (
-          <Box sx={{ mt: 1.5, mb: 0.5 }}>
+        {/* 2. Collection Report (AF 51) */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
+          <Tooltip title={isCollapsed ? 'Collection Report (AF 51)' : ''} placement="right" arrow>
             <ListItemButton
-              onClick={() => setCollectionsOpen(!collectionsOpen)}
+              selected={isRouteActive('/collection')}
+              onClick={() => { navigate('/collection'); setMobileOpen(false); }}
               sx={{
-                py: 0.5,
-                px: 1.5,
                 borderRadius: 1,
-                color: '#64748b',
-                '&:hover': { bgcolor: '#f8fafc', color: '#0284c7' }
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/collection') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/collection') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/collection') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
               }}
             >
-              <ListItemIcon sx={{ minWidth: 36, color: '#94a3b8' }}>
-                <ReceiptLong fontSize="small" />
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/collection') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <Receipt />
               </ListItemIcon>
-              <ListItemText 
-                primary="COLLECTIONS" 
-                primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.5px' }} 
-              />
-              {collectionsOpen ? <ExpandLess sx={{ fontSize: 18 }} /> : <ExpandMore sx={{ fontSize: 18 }} />}
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="Collection Report" 
+                  secondary="AF 51 General"
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/collection') ? 700 : 500, fontSize: '0.88rem' }} 
+                  secondaryTypographyProps={{ fontSize: '0.70rem' }}
+                />
+              )}
             </ListItemButton>
+          </Tooltip>
+        </ListItem>
 
-            <Collapse in={collectionsOpen} timeout="auto" unmountOnExit>
-              <List component="div" disablePadding sx={{ pl: 1 }}>
-                <ListItem disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    selected={isRouteActive('/collection')}
-                    onClick={() => { navigate('/collection'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.5,
-                      color: isRouteActive('/collection') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/collection') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/collection') ? '1px solid #bae6fd' : '1px solid transparent',
-                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/collection') ? '#0284c7' : '#64748b' }}>
-                      <Receipt fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="Collection Report" 
-                      secondary="AF 51 & General"
-                      primaryTypographyProps={{ fontWeight: isRouteActive('/collection') ? 700 : 500, fontSize: '0.84rem' }} 
-                      secondaryTypographyProps={{ fontSize: '0.68rem' }}
-                    />
-                  </ListItemButton>
-                </ListItem>
+        {/* 3. RPT Collection (AF 56) */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
+          <Tooltip title={isCollapsed ? 'RPT Collection (AF 56)' : ''} placement="right" arrow>
+            <ListItemButton
+              selected={isRouteActive('/rpt-collection')}
+              onClick={() => { navigate('/rpt-collection'); setMobileOpen(false); }}
+              sx={{
+                borderRadius: 1,
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/rpt-collection') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/rpt-collection') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/rpt-collection') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/rpt-collection') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <HomeWork />
+              </ListItemIcon>
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="RPT Collection" 
+                  secondary="AF 56 Real Property"
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/rpt-collection') ? 700 : 500, fontSize: '0.88rem' }} 
+                  secondaryTypographyProps={{ fontSize: '0.70rem' }}
+                />
+              )}
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
 
-                <ListItem disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    selected={isRouteActive('/rpt-collection')}
-                    onClick={() => { navigate('/rpt-collection'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.5,
-                      color: isRouteActive('/rpt-collection') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/rpt-collection') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/rpt-collection') ? '1px solid #bae6fd' : '1px solid transparent',
-                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/rpt-collection') ? '#0284c7' : '#64748b' }}>
-                      <HomeWork fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="RPT Collection" 
-                      secondary="AF 56 Real Property"
-                      primaryTypographyProps={{ fontWeight: isRouteActive('/rpt-collection') ? 700 : 500, fontSize: '0.84rem' }} 
-                      secondaryTypographyProps={{ fontSize: '0.68rem' }}
-                    />
-                  </ListItemButton>
-                </ListItem>
-              </List>
-            </Collapse>
-          </Box>
-        ) : (
-          <>
-            <ListItem disablePadding sx={{ mb: 0.5 }}>
-              <Tooltip title="Collection Report (AF 51)" placement="right" arrow>
-                <ListItemButton
-                  selected={isRouteActive('/collection')}
-                  onClick={() => { navigate('/collection'); setMobileOpen(false); }}
-                  sx={{
-                    borderRadius: 1,
-                    py: 0.8,
-                    px: 1.2,
-                    justifyContent: 'center',
-                    color: isRouteActive('/collection') ? '#0284c7' : '#475569',
-                    bgcolor: isRouteActive('/collection') ? '#f0f9ff' : 'transparent',
-                    border: isRouteActive('/collection') ? '1px solid #bae6fd' : '1px solid transparent',
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/collection') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                    <Receipt />
-                  </ListItemIcon>
-                </ListItemButton>
-              </Tooltip>
-            </ListItem>
-
-            <ListItem disablePadding sx={{ mb: 0.5 }}>
-              <Tooltip title="RPT Collection (AF 56)" placement="right" arrow>
-                <ListItemButton
-                  selected={isRouteActive('/rpt-collection')}
-                  onClick={() => { navigate('/rpt-collection'); setMobileOpen(false); }}
-                  sx={{
-                    borderRadius: 1,
-                    py: 0.8,
-                    px: 1.2,
-                    justifyContent: 'center',
-                    color: isRouteActive('/rpt-collection') ? '#0284c7' : '#475569',
-                    bgcolor: isRouteActive('/rpt-collection') ? '#f0f9ff' : 'transparent',
-                    border: isRouteActive('/rpt-collection') ? '1px solid #bae6fd' : '1px solid transparent',
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/rpt-collection') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                    <HomeWork />
-                  </ListItemIcon>
-                </ListItemButton>
-              </Tooltip>
-            </ListItem>
-          </>
-        )}
-
-        {/* 2. Reports & Summary */}
-        <ListItem disablePadding sx={{ mb: 0.5, mt: isCollapsed ? 0.5 : 1 }}>
+        {/* 4. Reports & Summary */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
           <Tooltip title={isCollapsed ? 'Reports & Summary (Appendix 34)' : ''} placement="right" arrow>
             <ListItemButton
               selected={isRouteActive('/reports')}
@@ -340,235 +269,136 @@ export const Layout: React.FC = () => {
                   primary="Reports & Summary" 
                   secondary="Official Appendix 34"
                   primaryTypographyProps={{ fontWeight: isRouteActive('/reports') ? 700 : 500, fontSize: '0.88rem' }} 
-                  secondaryTypographyProps={{ fontSize: '0.68rem' }}
+                  secondaryTypographyProps={{ fontSize: '0.70rem' }}
                 />
               )}
             </ListItemButton>
           </Tooltip>
         </ListItem>
 
-        {/* Section: Administration / Configuration (Expandable Group) */}
-        {!isCollapsed ? (
-          <Box sx={{ mt: 1.5, mb: 0.5 }}>
+        {/* 5. Account Codes */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
+          <Tooltip title={isCollapsed ? 'Account Codes' : ''} placement="right" arrow>
             <ListItemButton
-              onClick={() => setManagementOpen(!managementOpen)}
+              selected={isRouteActive('/account-codes')}
+              onClick={() => { navigate('/account-codes'); setMobileOpen(false); }}
               sx={{
-                py: 0.5,
-                px: 1.5,
                 borderRadius: 1,
-                color: '#64748b',
-                '&:hover': { bgcolor: '#f8fafc', color: '#0284c7' }
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/account-codes') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/account-codes') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/account-codes') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
               }}
             >
-              <ListItemIcon sx={{ minWidth: 36, color: '#94a3b8' }}>
-                <AdminPanelSettings fontSize="small" />
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/account-codes') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <ListAlt />
               </ListItemIcon>
-              <ListItemText 
-                primary="MANAGEMENT" 
-                primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.5px' }} 
-              />
-              {managementOpen ? <ExpandLess sx={{ fontSize: 18 }} /> : <ExpandMore sx={{ fontSize: 18 }} />}
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="Account Codes" 
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/account-codes') ? 700 : 500, fontSize: '0.88rem' }} 
+                />
+              )}
             </ListItemButton>
+          </Tooltip>
+        </ListItem>
 
-            <Collapse in={managementOpen} timeout="auto" unmountOnExit>
-              <List component="div" disablePadding sx={{ pl: 1 }}>
-                <ListItem disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    selected={isRouteActive('/account-codes')}
-                    onClick={() => { navigate('/account-codes'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.5,
-                      color: isRouteActive('/account-codes') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/account-codes') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/account-codes') ? '1px solid #bae6fd' : '1px solid transparent',
-                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/account-codes') ? '#0284c7' : '#64748b' }}>
-                      <ListAlt fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="Account Codes" 
-                      primaryTypographyProps={{ fontWeight: isRouteActive('/account-codes') ? 700 : 500, fontSize: '0.84rem' }} 
-                    />
-                  </ListItemButton>
-                </ListItem>
-
-                {isAdmin && (
-                  <ListItem disablePadding sx={{ mb: 0.5 }}>
-                    <ListItemButton
-                      selected={isRouteActive('/signatories')}
-                      onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
-                      sx={{
-                        borderRadius: 1,
-                        py: 0.8,
-                        px: 1.5,
-                        color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
-                        bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
-                        border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
-                        '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                      }}
-                    >
-                      <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b' }}>
-                        <People fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText 
-                        primary="Signatories" 
-                        primaryTypographyProps={{ fontWeight: isRouteActive('/signatories') ? 700 : 500, fontSize: '0.84rem' }} 
-                      />
-                    </ListItemButton>
-                  </ListItem>
+        {/* 6. Signatories (Admin Only) */}
+        {isAdmin && (
+          <ListItem disablePadding sx={{ mb: 0.5 }}>
+            <Tooltip title={isCollapsed ? 'Signatories (Admin Only)' : ''} placement="right" arrow>
+              <ListItemButton
+                selected={isRouteActive('/signatories')}
+                onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
+                sx={{
+                  borderRadius: 1,
+                  py: 0.8,
+                  px: isCollapsed ? 1.2 : 1.5,
+                  justifyContent: isCollapsed ? 'center' : 'flex-start',
+                  color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
+                  bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
+                  border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
+                  '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                  <People />
+                </ListItemIcon>
+                {!isCollapsed && (
+                  <ListItemText 
+                    primary="Signatories" 
+                    primaryTypographyProps={{ fontWeight: isRouteActive('/signatories') ? 700 : 500, fontSize: '0.88rem' }} 
+                  />
                 )}
-
-                {isAdmin && (
-                  <ListItem disablePadding sx={{ mb: 0.5 }}>
-                    <ListItemButton
-                      selected={isRouteActive('/users')}
-                      onClick={() => { navigate('/users'); setMobileOpen(false); }}
-                      sx={{
-                        borderRadius: 1,
-                        py: 0.8,
-                        px: 1.5,
-                        color: isRouteActive('/users') ? '#0284c7' : '#475569',
-                        bgcolor: isRouteActive('/users') ? '#f0f9ff' : 'transparent',
-                        border: isRouteActive('/users') ? '1px solid #bae6fd' : '1px solid transparent',
-                        '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                      }}
-                    >
-                      <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/users') ? '#0284c7' : '#64748b' }}>
-                        <SupervisorAccount fontSize="small" />
-                      </ListItemIcon>
-                      <ListItemText 
-                        primary="Users" 
-                        primaryTypographyProps={{ fontWeight: isRouteActive('/users') ? 700 : 500, fontSize: '0.84rem' }} 
-                      />
-                    </ListItemButton>
-                  </ListItem>
-                )}
-
-                <ListItem disablePadding sx={{ mb: 0.5 }}>
-                  <ListItemButton
-                    selected={isRouteActive('/settings')}
-                    onClick={() => { navigate('/settings'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.5,
-                      color: isRouteActive('/settings') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/settings') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/settings') ? '1px solid #bae6fd' : '1px solid transparent',
-                      '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 32, color: isRouteActive('/settings') ? '#0284c7' : '#64748b' }}>
-                      <Settings fontSize="small" />
-                    </ListItemIcon>
-                    <ListItemText 
-                      primary="Settings" 
-                      primaryTypographyProps={{ fontWeight: isRouteActive('/settings') ? 700 : 500, fontSize: '0.84rem' }} 
-                    />
-                  </ListItemButton>
-                </ListItem>
-              </List>
-            </Collapse>
-          </Box>
-        ) : (
-          <>
-            <ListItem disablePadding sx={{ mb: 0.5 }}>
-              <Tooltip title="Account Codes" placement="right" arrow>
-                <ListItemButton
-                  selected={isRouteActive('/account-codes')}
-                  onClick={() => { navigate('/account-codes'); setMobileOpen(false); }}
-                  sx={{
-                    borderRadius: 1,
-                    py: 0.8,
-                    px: 1.2,
-                    justifyContent: 'center',
-                    color: isRouteActive('/account-codes') ? '#0284c7' : '#475569',
-                    bgcolor: isRouteActive('/account-codes') ? '#f0f9ff' : 'transparent',
-                    border: isRouteActive('/account-codes') ? '1px solid #bae6fd' : '1px solid transparent',
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/account-codes') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                    <ListAlt />
-                  </ListItemIcon>
-                </ListItemButton>
-              </Tooltip>
-            </ListItem>
-
-            {isAdmin && (
-              <ListItem disablePadding sx={{ mb: 0.5 }}>
-                <Tooltip title="Signatories" placement="right" arrow>
-                  <ListItemButton
-                    selected={isRouteActive('/signatories')}
-                    onClick={() => { navigate('/signatories'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.2,
-                      justifyContent: 'center',
-                      color: isRouteActive('/signatories') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/signatories') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/signatories') ? '1px solid #bae6fd' : '1px solid transparent',
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/signatories') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                      <People />
-                    </ListItemIcon>
-                  </ListItemButton>
-                </Tooltip>
-              </ListItem>
-            )}
-
-            {isAdmin && (
-              <ListItem disablePadding sx={{ mb: 0.5 }}>
-                <Tooltip title="Users Management" placement="right" arrow>
-                  <ListItemButton
-                    selected={isRouteActive('/users')}
-                    onClick={() => { navigate('/users'); setMobileOpen(false); }}
-                    sx={{
-                      borderRadius: 1,
-                      py: 0.8,
-                      px: 1.2,
-                      justifyContent: 'center',
-                      color: isRouteActive('/users') ? '#0284c7' : '#475569',
-                      bgcolor: isRouteActive('/users') ? '#f0f9ff' : 'transparent',
-                      border: isRouteActive('/users') ? '1px solid #bae6fd' : '1px solid transparent',
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/users') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                      <SupervisorAccount />
-                    </ListItemIcon>
-                  </ListItemButton>
-                </Tooltip>
-              </ListItem>
-            )}
-
-            <ListItem disablePadding sx={{ mb: 0.5 }}>
-              <Tooltip title="Settings" placement="right" arrow>
-                <ListItemButton
-                  selected={isRouteActive('/settings')}
-                  onClick={() => { navigate('/settings'); setMobileOpen(false); }}
-                  sx={{
-                    borderRadius: 1,
-                    py: 0.8,
-                    px: 1.2,
-                    justifyContent: 'center',
-                    color: isRouteActive('/settings') ? '#0284c7' : '#475569',
-                    bgcolor: isRouteActive('/settings') ? '#f0f9ff' : 'transparent',
-                    border: isRouteActive('/settings') ? '1px solid #bae6fd' : '1px solid transparent',
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 0, color: isRouteActive('/settings') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
-                    <Settings />
-                  </ListItemIcon>
-                </ListItemButton>
-              </Tooltip>
-            </ListItem>
-          </>
+              </ListItemButton>
+            </Tooltip>
+          </ListItem>
         )}
+
+        {/* 7. Users (Admin Only) */}
+        {isAdmin && (
+          <ListItem disablePadding sx={{ mb: 0.5 }}>
+            <Tooltip title={isCollapsed ? 'Users Management (Admin Only)' : ''} placement="right" arrow>
+              <ListItemButton
+                selected={isRouteActive('/users')}
+                onClick={() => { navigate('/users'); setMobileOpen(false); }}
+                sx={{
+                  borderRadius: 1,
+                  py: 0.8,
+                  px: isCollapsed ? 1.2 : 1.5,
+                  justifyContent: isCollapsed ? 'center' : 'flex-start',
+                  color: isRouteActive('/users') ? '#0284c7' : '#475569',
+                  bgcolor: isRouteActive('/users') ? '#f0f9ff' : 'transparent',
+                  border: isRouteActive('/users') ? '1px solid #bae6fd' : '1px solid transparent',
+                  '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/users') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                  <SupervisorAccount />
+                </ListItemIcon>
+                {!isCollapsed && (
+                  <ListItemText 
+                    primary="Users" 
+                    primaryTypographyProps={{ fontWeight: isRouteActive('/users') ? 700 : 500, fontSize: '0.88rem' }} 
+                  />
+                )}
+              </ListItemButton>
+            </Tooltip>
+          </ListItem>
+        )}
+
+        {/* 8. Settings */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
+          <Tooltip title={isCollapsed ? 'Settings & Preferences' : ''} placement="right" arrow>
+            <ListItemButton
+              selected={isRouteActive('/settings')}
+              onClick={() => { navigate('/settings'); setMobileOpen(false); }}
+              sx={{
+                borderRadius: 1,
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/settings') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/settings') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/settings') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/settings') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <Settings />
+              </ListItemIcon>
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="Settings" 
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/settings') ? 700 : 500, fontSize: '0.88rem' }} 
+                />
+              )}
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
       </List>
 
       <Divider sx={{ borderColor: '#e2e8f0' }} />
