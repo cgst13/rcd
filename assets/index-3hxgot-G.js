@@ -900,8 +900,8 @@ ${C}`}class Pn extends Error{constructor({message:t,code:r,cause:n,name:a}){var 
                     <td class="text-right">₱ ${oe.amount.toLocaleString("en-PH",{minimumFractionDigits:2})}</td>
                   </tr>
                 `).join("")}
-                <!-- Exact filler rows to match 35 total rows (30 + 5 additional rows) -->
-                ${Array(Math.max(0,34-tr.length)).fill(0).map(()=>`
+                <!-- Exact filler rows to match 32 total rows (reduced by 3 rows) -->
+                ${Array(Math.max(0,31-tr.length)).fill(0).map(()=>`
                   <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
                 `).join("")}
               </tbody>
