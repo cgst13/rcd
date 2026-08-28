@@ -156,9 +156,7 @@ export const getAccountCodes = async (): Promise<AccountCode[]> => {
         .select('*')
         .order('id', { ascending: true });
 
-      if (error) throw error;
-
-      if (data && data.length > 0) {
+      if (!error && data) {
         return data.map((row: any) => ({
           id: row.id,
           mainCategory: row.main_category,
@@ -173,22 +171,12 @@ export const getAccountCodes = async (): Promise<AccountCode[]> => {
 
   const stored = localStorage.getItem('account_codes');
   if (stored) {
-    return JSON.parse(stored);
+    try {
+      return JSON.parse(stored);
+    } catch {}
   }
 
-  return [
-    { id: 1, mainCategory: 'Tax Revenue', subCategory: 'Community Tax - Individual', code: '4-01-01-050' },
-    { id: 2, mainCategory: 'Tax Revenue', subCategory: 'Community Tax - Corporation', code: '4-01-01-060' },
-    { id: 3, mainCategory: 'Tax Revenue', subCategory: 'Real Property Tax - Basic', code: '4-01-02-040' },
-    { id: 4, mainCategory: 'Tax Revenue', subCategory: 'Special Education Tax (SEF)', code: '4-01-02-050' },
-    { id: 5, mainCategory: 'Tax Revenue', subCategory: 'Business Tax', code: '4-01-03-010' },
-    { id: 6, mainCategory: 'Service and Business Income', subCategory: "Permit Fees (Mayor's Permit)", code: '4-02-01-010' },
-    { id: 7, mainCategory: 'Service and Business Income', subCategory: 'Clearance and Certification Fees', code: '4-02-01-040' },
-    { id: 8, mainCategory: 'Service and Business Income', subCategory: 'Garbage Fees', code: '4-02-01-100' },
-    { id: 9, mainCategory: 'Service and Business Income', subCategory: 'Market Operations', code: '4-02-02-050' },
-    { id: 10, mainCategory: 'Service and Business Income', subCategory: 'Slaughterhouse Operations', code: '4-02-02-060' },
-    { id: 11, mainCategory: 'Service and Business Income', subCategory: 'Cemetery Operations', code: '4-02-02-070' },
-  ];
+  return [];
 };
 
 export const saveAccountCode = async (code: AccountCode): Promise<boolean> => {

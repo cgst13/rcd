@@ -333,22 +333,8 @@ create policy "Users and Admins delete signatories"
   using (auth.uid() = user_id or public.is_admin());
 
 -- ================================================================
--- INITIAL SEED DATA (System default account codes & signatories)
+-- INITIAL SEED DATA (System default official signatories)
 -- ================================================================
-insert into public.rcd_account_codes (user_id, main_category, sub_category, code) values
-  (null, 'Tax Revenue', 'Community Tax - Individual', '4-01-01-050'),
-  (null, 'Tax Revenue', 'Community Tax - Corporation', '4-01-01-060'),
-  (null, 'Tax Revenue', 'Real Property Tax - Basic', '4-01-02-040'),
-  (null, 'Tax Revenue', 'Special Education Tax (SEF)', '4-01-02-050'),
-  (null, 'Tax Revenue', 'Business Tax', '4-01-03-010'),
-  (null, 'Service and Business Income', 'Permit Fees (Mayor''s Permit)', '4-02-01-010'),
-  (null, 'Service and Business Income', 'Clearance and Certification Fees', '4-02-01-040'),
-  (null, 'Service and Business Income', 'Garbage Fees', '4-02-01-100'),
-  (null, 'Service and Business Income', 'Market Operations', '4-02-02-050'),
-  (null, 'Service and Business Income', 'Slaughterhouse Operations', '4-02-02-060'),
-  (null, 'Service and Business Income', 'Cemetery Operations', '4-02-02-070')
-on conflict do nothing;
-
 insert into public.rcd_signatories (user_id, full_name, position, department, remarks) values
   (null, 'MENARD A. HERRERA', 'Municipal Treasurer', 'Office of the Municipal Treasurer', 'Municipal Treasurer / Verification & Acknowledgment'),
   (null, 'LEON F. PAZ, JR.', 'Municipal Accountant', 'Office of the Municipal Accountant', 'Municipal Accountant / Certified Correct'),
