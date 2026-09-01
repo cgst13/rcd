@@ -31,7 +31,8 @@ import {
   ChevronLeft,
   ChevronRight,
   SupervisorAccount,
-  AdminPanelSettings
+  AdminPanelSettings,
+  Summarize
 } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
@@ -276,6 +277,40 @@ export const Layout: React.FC = () => {
           </Tooltip>
         </ListItem>
 
+        {/* 4b. Admin Reports (Admin Only) */}
+        {isAdmin && (
+          <ListItem disablePadding sx={{ mb: 0.5 }}>
+            <Tooltip title={isCollapsed ? 'Admin Reports (Admin Only)' : ''} placement="right" arrow>
+              <ListItemButton
+                selected={isRouteActive('/admin-reports')}
+                onClick={() => { navigate('/admin-reports'); setMobileOpen(false); }}
+                sx={{
+                  borderRadius: 1,
+                  py: 0.8,
+                  px: isCollapsed ? 1.2 : 1.5,
+                  justifyContent: isCollapsed ? 'center' : 'flex-start',
+                  color: isRouteActive('/admin-reports') ? '#0284c7' : '#475569',
+                  bgcolor: isRouteActive('/admin-reports') ? '#f0f9ff' : 'transparent',
+                  border: isRouteActive('/admin-reports') ? '1px solid #bae6fd' : '1px solid transparent',
+                  '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/admin-reports') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                  <Summarize />
+                </ListItemIcon>
+                {!isCollapsed && (
+                  <ListItemText 
+                    primary="Admin Reports" 
+                    secondary="Executive & Audit"
+                    primaryTypographyProps={{ fontWeight: isRouteActive('/admin-reports') ? 700 : 500, fontSize: '0.88rem' }} 
+                    secondaryTypographyProps={{ fontSize: '0.70rem' }}
+                  />
+                )}
+              </ListItemButton>
+            </Tooltip>
+          </ListItem>
+        )}
+
         {/* 5. Account Codes */}
         <ListItem disablePadding sx={{ mb: 0.5 }}>
           <Tooltip title={isCollapsed ? 'Account Codes' : ''} placement="right" arrow>
@@ -509,8 +544,10 @@ export const Layout: React.FC = () => {
                 {location.pathname === '/collection' && 'Collections (AF 51)'}
                 {location.pathname === '/rpt-collection' && 'RPT Collection (AF 56)'}
                 {location.pathname === '/reports' && 'Reports & Summaries'}
+                {location.pathname === '/admin-reports' && 'Admin Reports'}
                 {location.pathname === '/account-codes' && 'Chart of Accounts'}
                 {location.pathname === '/signatories' && 'Authorized Signatories'}
+                {location.pathname === '/users' && 'Users Management'}
                 {location.pathname === '/settings' && 'Settings'}
               </Box>
             </Typography>

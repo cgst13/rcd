@@ -11,6 +11,7 @@ import { SignatoriesPage } from './pages/SignatoriesPage';
 import { RPTCollectionPage } from './pages/RPTCollectionPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { UsersPage } from './pages/UsersPage';
+import { AdminReportsPage } from './pages/AdminReportsPage';
 import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
@@ -98,6 +99,11 @@ function AppRoutes() {
         <Route path="/collection" element={<CollectionReportPage />} />
         <Route path="/account-codes" element={<AccountCodesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/admin-reports" element={
+          <AdminRoute>
+            <AdminReportsPage />
+          </AdminRoute>
+        } />
         <Route path="/signatories" element={<SignatoriesPage />} />
         <Route path="/rpt-collection" element={<RPTCollectionPage />} />
         <Route path="/users" element={
