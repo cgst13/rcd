@@ -1962,3 +1962,316 @@ export const getLguDepartments = async (): Promise<LguDepartment[]> => {
   ];
 };
 
+// ============================================================================
+// 11. ADMIN CONSOLIDATED REPORTS & SUBMISSION TRACKING
+// ============================================================================
+
+export interface AdminSubCategoryCharge {
+  subCategory: string;
+  mainCategory: string;
+  accountCode: string;
+  itemCount: number;
+  amount: number;
+}
+
+export interface AdminSubmittedReportRecord {
+  id: string;
+  reportNumber: string;
+  collectorName: string;
+  collectorEmail?: string;
+  userId?: string;
+  afNo: string;
+  orRange: string;
+  orCount: number;
+  orNumbers: string[];
+  itemIds: number[];
+  collectionType: 'general' | 'rpt';
+  totalAmount: number;
+  subCategorySummary: AdminSubCategoryCharge[];
+  submittedAt: string;
+  submittedBy: string;
+  status: 'Submitted' | 'Verified';
+  dateFrom: string;
+  dateTo: string;
+  notes?: string;
+}
+
+export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRecord[]> => {
+  const localStored: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+
+  if (isSupabaseConfigured()) {
+    try {
+      const data = await fetchAllRows(async (from, to) => {
+        return await supabase
+          .from('rcd_reports')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+      });
+
+      if (data && data.length > 0) {
+        const remoteReports: AdminSubmittedReportRecord[] = data.map((r: any) => {
+          const colData = r.collections;
+          const isStructured = colData && typeof colData === 'object' && !Array.isArray(colData);
+          
+          const subCategorySummary: AdminSubCategoryCharge[] = isStructured
+            ? (colData.subCategories || colData.subCategorySummary || [])
+            : (Array.isArray(colData) ? colData : []);
+
+          // Extract Booklet No. (afNo)
+          let afNo = isStructured && colData.afNo ? String(colData.afNo) : '';
+          if (!afNo && r.report_number && r.report_number.startsWith('ADM-')) {
+            const parts = r.report_number.split('-');
+            if (parts.length >= 3) {
+              afNo = parts[1]; // e.g. ADM-214-086207 -> "214"
+            }
+          }
+          if (!afNo) {
+            afNo = r.fund_type === 'SEF' ? 'A.F. NO. 56' : (r.report_number?.includes('56') ? 'A.F. NO. 56' : 'A.F. NO. 51');
+          }
+
+          // Extract OR Range
+          let orRange = isStructured && colData.orRange ? colData.orRange : '';
+          const orNumbers: string[] = isStructured && Array.isArray(colData.orNumbers)
+            ? colData.orNumbers
+            : subCategorySummary.map((c: any) => c.orNo || c.orNumber || '').filter(Boolean);
+
+          if (!orRange && orNumbers.length > 0) {
+            if (orNumbers.length === 1) orRange = orNumbers[0];
+            else {
+              const sorted = [...orNumbers].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+              orRange = `${sorted[0]} — ${sorted[sorted.length - 1]} (${sorted.length} ORs)`;
+            }
+          }
+          if (!orRange) {
+            orRange = r.report_number || '';
+          }
+
+          const orCount = isStructured && typeof colData.orCount === 'number'
+            ? colData.orCount
+            : (orNumbers.length || subCategorySummary.length);
+
+          const itemIds: number[] = isStructured && Array.isArray(colData.itemIds)
+            ? colData.itemIds
+            : subCategorySummary.map((c: any) => c.id).filter(Boolean);
+
+          const collectionType: 'general' | 'rpt' = (isStructured && colData.collectionType)
+            ? colData.collectionType
+            : (r.fund_type === 'SEF' || r.report_number?.includes('AF56') ? 'rpt' : 'general');
+
+          return {
+            id: r.id,
+            reportNumber: r.report_number || `RPT-${r.id.substring(0, 8)}`,
+            collectorName: r.collector_name || 'Collector',
+            collectorEmail: r.collector_email,
+            userId: r.user_id,
+            afNo,
+            orRange,
+            orCount,
+            orNumbers,
+            itemIds,
+            collectionType,
+            totalAmount: parseFloat(r.total_collection || 0),
+            subCategorySummary,
+            submittedAt: r.created_at || new Date().toISOString(),
+            submittedBy: isStructured && colData.submittedBy ? colData.submittedBy : 'Administrator',
+            status: r.status || 'Submitted',
+            dateFrom: isStructured && colData.dateFrom ? colData.dateFrom : (r.date || ''),
+            dateTo: isStructured && colData.dateTo ? colData.dateTo : (r.date || '')
+          };
+        });
+
+        // Merge local and remote, keyed strictly by reportNumber so NO duplicate rows ever appear
+        const mergedMap = new Map<string, AdminSubmittedReportRecord>();
+
+        // 1. Add remote reports first
+        remoteReports.forEach(r => {
+          const key = (r.reportNumber || r.id).trim().toUpperCase();
+          mergedMap.set(key, r);
+        });
+
+        // 2. Overlay localStored (prefer local's richer metadata if available, but retain remote ID if valid uuid)
+        localStored.forEach(l => {
+          const key = (l.reportNumber || l.id).trim().toUpperCase();
+          const remote = mergedMap.get(key);
+          if (remote) {
+            mergedMap.set(key, {
+              ...remote,
+              ...l,
+              id: isValidUuid(remote.id) ? remote.id : l.id,
+              afNo: l.afNo || remote.afNo,
+              orRange: l.orRange || remote.orRange,
+              orNumbers: l.orNumbers?.length ? l.orNumbers : remote.orNumbers,
+              orCount: l.orCount || remote.orCount,
+              subCategorySummary: l.subCategorySummary?.length ? l.subCategorySummary : remote.subCategorySummary
+            });
+          } else {
+            mergedMap.set(key, l);
+          }
+        });
+
+        return Array.from(mergedMap.values()).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      }
+    } catch (e) {
+      console.warn('Error fetching submitted reports from Supabase:', e);
+    }
+  }
+
+  return localStored.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+};
+
+export const getSubmittedItemIds = async (): Promise<Set<string>> => {
+  const submittedSet = new Set<string>();
+
+  // 1. Check localStorage tracking
+  const localItemKeys: string[] = JSON.parse(localStorage.getItem('rcd_submitted_item_keys') || '[]');
+  localItemKeys.forEach(k => submittedSet.add(k));
+
+  // 2. Check submitted reports
+  const submittedReports = await getAdminSubmittedReports();
+  submittedReports.forEach(report => {
+    report.itemIds.forEach(id => {
+      submittedSet.add(`${report.collectionType}_${id}`);
+    });
+    report.orNumbers.forEach(or => {
+      if (or) submittedSet.add(`or_${report.afNo}_${or}`);
+    });
+  });
+
+  return submittedSet;
+};
+
+export const saveAdminSubmittedReport = async (
+  record: AdminSubmittedReportRecord
+): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+
+  // 1. Save to local storage (deduplicated by reportNumber and id)
+  const current: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  const updated = [
+    record, 
+    ...current.filter(r => r.id !== record.id && r.reportNumber !== record.reportNumber)
+  ];
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updated));
+
+  // 2. Update submitted item keys in local storage
+  const currentKeys: string[] = JSON.parse(localStorage.getItem('rcd_submitted_item_keys') || '[]');
+  const newKeys = new Set(currentKeys);
+  record.itemIds.forEach(id => newKeys.add(`${record.collectionType}_${id}`));
+  record.orNumbers.forEach(or => {
+    if (or) newKeys.add(`or_${record.afNo}_${or}`);
+  });
+  localStorage.setItem('rcd_submitted_item_keys', JSON.stringify(Array.from(newKeys)));
+
+  // 3. Sync to Supabase rcd_reports table
+  if (isSupabaseConfigured()) {
+    try {
+      const fundType = record.collectionType === 'rpt' ? 'SEF' : 'General Fund';
+      
+      const reportPayload = {
+        subCategories: record.subCategorySummary,
+        afNo: record.afNo,
+        orRange: record.orRange,
+        orNumbers: record.orNumbers,
+        orCount: record.orCount,
+        itemIds: record.itemIds,
+        collectionType: record.collectionType,
+        dateFrom: record.dateFrom,
+        dateTo: record.dateTo,
+        submittedBy: record.submittedBy
+      };
+
+      await supabase
+        .from('rcd_reports')
+        .insert({
+          user_id: isValidUuid(record.userId) ? record.userId : (isValidUuid(user?.id) ? user.id : null),
+          collector_email: record.collectorEmail || user?.email || null,
+          report_number: record.reportNumber,
+          date: record.dateTo || new Date().toISOString().split('T')[0],
+          collector_name: record.collectorName,
+          fund_type: fundType,
+          collections: reportPayload,
+          total_collection: record.totalAmount,
+          deposits: [],
+          total_deposit: 0,
+          status: 'Submitted'
+        });
+
+      // Try updating status column in rcd_collections / rcd_rpt_collections if exists
+      const table = record.collectionType === 'rpt' ? 'rcd_rpt_collections' : 'rcd_collections';
+      try {
+        await supabase
+          .from(table)
+          .update({ status: 'Submitted' })
+          .in('id', record.itemIds);
+      } catch {}
+    } catch (e) {
+      console.warn('Error saving submitted report to Supabase:', e);
+    }
+  }
+
+  return true;
+};
+
+export const unmarkAdminSubmittedReport = async (
+  reportId: string,
+  itemIds: number[],
+  collectionType: 'general' | 'rpt',
+  afNo?: string,
+  orNumbers?: string[]
+): Promise<boolean> => {
+  // 1. Remove from local storage reports
+  const current: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  const targetReport = current.find(r => r.id === reportId);
+  const targetReportNumber = targetReport?.reportNumber;
+
+  const updated = current.filter(r => r.id !== reportId && (!targetReportNumber || r.reportNumber !== targetReportNumber));
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updated));
+
+  // 2. Remove from submitted item keys
+  const currentKeys: string[] = JSON.parse(localStorage.getItem('rcd_submitted_item_keys') || '[]');
+  const keysToRemove = new Set<string>();
+  itemIds.forEach(id => keysToRemove.add(`${collectionType}_${id}`));
+  if (orNumbers && afNo) {
+    orNumbers.forEach(or => keysToRemove.add(`or_${afNo}_${or}`));
+  }
+  const filteredKeys = currentKeys.filter(k => !keysToRemove.has(k));
+  localStorage.setItem('rcd_submitted_item_keys', JSON.stringify(filteredKeys));
+
+  // 3. Update Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      if (isValidUuid(reportId)) {
+        await supabase
+          .from('rcd_reports')
+          .delete()
+          .eq('id', reportId);
+      } else if (targetReportNumber) {
+        await supabase
+          .from('rcd_reports')
+          .delete()
+          .eq('report_number', targetReportNumber);
+      }
+
+      const table = collectionType === 'rpt' ? 'rcd_rpt_collections' : 'rcd_collections';
+      try {
+        await supabase
+          .from(table)
+          .update({ status: 'Pending' })
+          .in('id', itemIds);
+      } catch {}
+    } catch (e) {
+      console.warn('Error unmarking report in Supabase:', e);
+    }
+  }
+
+  return true;
+};
+
+

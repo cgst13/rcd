@@ -71,9 +71,11 @@ create table if not exists public.rcd_collections (
 );
 
 alter table public.rcd_collections add column if not exists collector_email text;
+alter table public.rcd_collections add column if not exists status text default 'Pending';
 create index if not exists idx_rcd_collections_user_id on public.rcd_collections(user_id);
 create index if not exists idx_rcd_collections_collector_email on public.rcd_collections(collector_email);
 create index if not exists idx_rcd_collections_date on public.rcd_collections(date);
+create index if not exists idx_rcd_collections_status on public.rcd_collections(status);
 
 -- 5. REAL PROPERTY TAX (RPT) COLLECTIONS TABLE (rcd_rpt_collections)
 create table if not exists public.rcd_rpt_collections (
@@ -94,9 +96,11 @@ create table if not exists public.rcd_rpt_collections (
 );
 
 alter table public.rcd_rpt_collections add column if not exists collector_email text;
+alter table public.rcd_rpt_collections add column if not exists status text default 'Pending';
 create index if not exists idx_rcd_rpt_collections_user_id on public.rcd_rpt_collections(user_id);
 create index if not exists idx_rcd_rpt_collections_collector_email on public.rcd_rpt_collections(collector_email);
 create index if not exists idx_rcd_rpt_collections_date on public.rcd_rpt_collections(date);
+create index if not exists idx_rcd_rpt_collections_status on public.rcd_rpt_collections(status);
 
 -- 6. ACCOUNT CODES TABLE (rcd_account_codes)
 create table if not exists public.rcd_account_codes (
