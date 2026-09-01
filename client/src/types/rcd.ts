@@ -3,6 +3,8 @@ export interface RCDReport {
   date: string;
   reportNumber: string;
   collectorName: string;
+  collectorEmail?: string;
+  userId?: string;
   fundType: 'General Fund' | 'Trust Fund' | 'SEF';
   collections: CollectionItem[];
   totalCollection: number;
@@ -16,6 +18,8 @@ export interface CollectionItem {
   natureOfCollection: string; // e.g., "Business Tax", "Community Tax"
   accountCode?: string;
   amount: number;
+  collectorEmail?: string;
+  userId?: string;
 }
 
 export interface DepositItem {
@@ -65,4 +69,7 @@ export interface RPTCollectionItem {
   amount: number;
   date: string;
   remarks?: string;
+  collectorEmail?: string;
+  userId?: string;
 }
+

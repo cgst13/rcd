@@ -2,6 +2,7 @@ import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider, CssBaseline, CircularProgress, Box } from '@mui/material';
 import { theme } from './theme';
 import { LoginPage } from './pages/LoginPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { CollectionReportPage } from './pages/CollectionReportPage';
 import { AccountCodesPage } from './pages/AccountCodesPage';
@@ -85,6 +86,7 @@ function AppRoutes() {
           <LoginPage />
         </PublicRoute>
       } />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       
       {/* Protected Routes wrapped in Layout */}
       <Route element={
@@ -96,11 +98,7 @@ function AppRoutes() {
         <Route path="/collection" element={<CollectionReportPage />} />
         <Route path="/account-codes" element={<AccountCodesPage />} />
         <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/signatories" element={
-          <AdminRoute>
-            <SignatoriesPage />
-          </AdminRoute>
-        } />
+        <Route path="/signatories" element={<SignatoriesPage />} />
         <Route path="/rpt-collection" element={<RPTCollectionPage />} />
         <Route path="/users" element={
           <AdminRoute>

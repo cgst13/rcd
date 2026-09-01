@@ -27,7 +27,8 @@ import {
   InputAdornment,
   Avatar,
   Stack,
-  Card
+  Card,
+  Autocomplete
 } from '@mui/material';
 import {
   PersonAdd,
@@ -51,7 +52,9 @@ import {
   createManagedUser, 
   updateManagedUser, 
   deleteManagedUser,
-  type ManagedUser 
+  getLguDepartments,
+  type ManagedUser,
+  type LguDepartment 
 } from '../services/supabaseService';
 import { Notification } from '../components/Notification';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -73,13 +76,28 @@ export const UsersPage: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(null);
 
-  const [formData, setFormData] = useState({
-    fullName: '',
+  const [formData, setFormData] = useState<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    department: string;
+    position: string;
+    role: string;
+    password: string;
+    status: 'Active' | 'Inactive';
+  }>({
+    firstName: '',
+    lastName: '',
     email: '',
+    department: '',
+    position: '',
     role: 'user',
     password: '',
-    status: 'Active' as 'Active' | 'Inactive'
+    status: 'Active'
   });
+
+  // LGU Departments State
+  const [lguDepartments, setLguDepartments] = useState<LguDepartment[]>([]);
 
   // Delete State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -105,7 +123,7 @@ export const UsersPage: React.FC = () => {
       console.error('Failed to load users', error);
       setNotification({
         open: true,
-        message: 'Failed to retrieve user records.',
+        message: 'Failed to load user profiles.',
         severity: 'error'
       });
     } finally {
@@ -115,12 +133,16 @@ export const UsersPage: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
+    getLguDepartments().then(depts => setLguDepartments(depts)).catch(() => {});
   }, []);
 
   const handleOpenAdd = () => {
     setFormData({
-      fullName: '',
+      firstName: '',
+      lastName: '',
       email: '',
+      department: '',
+      position: '',
       role: 'user',
       password: '',
       status: 'Active'
@@ -132,11 +154,14 @@ export const UsersPage: React.FC = () => {
 
   const handleOpenEdit = (user: ManagedUser) => {
     setFormData({
-      fullName: user.fullName,
+      firstName: user.firstName || user.fullName.split(' ')[0] || '',
+      lastName: user.lastName || user.fullName.split(' ').slice(1).join(' ') || '',
       email: user.email,
+      department: user.department || '',
+      position: user.position || '',
       role: user.role,
       password: '',
-      status: user.status as 'Active' | 'Inactive' || 'Active'
+      status: (user.status as 'Active' | 'Inactive') || 'Active'
     });
     setIsEditing(true);
     setCurrentId(user.id);
@@ -148,10 +173,10 @@ export const UsersPage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.fullName.trim() || !formData.email.trim()) {
+    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim()) {
       setNotification({
         open: true,
-        message: 'Please provide full name and email address.',
+        message: 'Please provide first name, last name, and email address.',
         severity: 'warning'
       });
       return;
@@ -161,15 +186,20 @@ export const UsersPage: React.FC = () => {
     try {
       if (isEditing && currentId) {
         const success = await updateManagedUser(currentId, {
-          fullName: formData.fullName.trim(),
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
+          fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim(),
           email: formData.email.trim(),
+          department: formData.department.trim(),
+          position: formData.position.trim(),
           role: formData.role,
-          status: formData.status
+          status: formData.status,
+          ...(formData.password.trim() ? { password: formData.password.trim() } : {})
         });
         if (success) {
           setNotification({
             open: true,
-            message: `User ${formData.fullName} updated successfully.`,
+            message: `User ${formData.firstName} ${formData.lastName} updated successfully.`,
             severity: 'success'
           });
           setOpenDialog(false);
@@ -177,22 +207,26 @@ export const UsersPage: React.FC = () => {
         } else {
           setNotification({
             open: true,
-            message: 'Failed to update user.',
+            message: 'Failed to update user profile.',
             severity: 'error'
           });
         }
       } else {
         const created = await createManagedUser({
-          fullName: formData.fullName.trim(),
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
+          fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim(),
           email: formData.email.trim(),
+          department: formData.department.trim(),
+          position: formData.position.trim(),
           role: formData.role,
-          password: formData.password,
+          password: formData.password.trim(),
           status: formData.status
         });
         if (created) {
           setNotification({
             open: true,
-            message: `User ${formData.fullName} created successfully.`,
+            message: `User ${created.fullName} created successfully in public.users.`,
             severity: 'success'
           });
           setOpenDialog(false);
@@ -200,7 +234,7 @@ export const UsersPage: React.FC = () => {
         } else {
           setNotification({
             open: true,
-            message: 'Failed to create user profile.',
+            message: 'Failed to create user account.',
             severity: 'error'
           });
         }
@@ -259,12 +293,14 @@ export const UsersPage: React.FC = () => {
     return users.filter(u => {
       const matchesSearch = 
         u.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.email.toLowerCase().includes(searchTerm.toLowerCase());
+        u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (u.department && u.department.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (u.position && u.position.toLowerCase().includes(searchTerm.toLowerCase()));
       
       const matchesRole = 
         filterRole === 'ALL' || 
         (filterRole === 'admin' && (u.role.toLowerCase() === 'admin' || u.role.toLowerCase() === 'administrator')) ||
-        (filterRole === 'user' && u.role.toLowerCase() === 'user');
+        (filterRole === 'user' && (u.role.toLowerCase() === 'user' || u.role.toLowerCase() === 'collector'));
 
       return matchesSearch && matchesRole;
     });
@@ -303,7 +339,7 @@ export const UsersPage: React.FC = () => {
         onClose={() => setDeleteDialogOpen(false)}
         onConfirm={handleConfirmDelete}
         title="Delete User Account"
-        message={userToDelete ? `Are you sure you want to remove user "${userToDelete.fullName}" (${userToDelete.email})? This action cannot be undone.` : "Are you sure you want to delete this user?"}
+        message={userToDelete ? `Are you sure you want to remove user "${userToDelete.fullName}" (${userToDelete.email}) from public.users? This action cannot be undone.` : "Are you sure you want to delete this user?"}
         confirmText="Delete User"
         severity="error"
       />
@@ -316,13 +352,13 @@ export const UsersPage: React.FC = () => {
               User Management
             </Typography>
             <Chip 
-              label="Admin Console" 
+              label="public.users Table" 
               size="small" 
               sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0284c7', border: '1px solid rgba(14, 165, 233, 0.3)', borderRadius: 1 }} 
             />
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Manage municipal revenue personnel, administrators, and collector access credentials.
+            Manage municipal revenue personnel, department assignments, and login credentials in the public.users database.
           </Typography>
         </Box>
 
@@ -444,24 +480,22 @@ export const UsersPage: React.FC = () => {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', flexGrow: 1 }}>
             <Box sx={{ minWidth: 260, flexGrow: 1, maxWidth: 400 }}>
               <TextField
-                placeholder="Search users by name or email..."
+                placeholder="Search users by name, email, department, position..."
                 size="small"
                 fullWidth
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                slotProps={{
-                  input: {
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <Search fontSize="small" sx={{ color: '#0284c7' }} />
-                      </InputAdornment>
-                    ),
-                  }
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search sx={{ color: '#94a3b8' }} fontSize="small" />
+                    </InputAdornment>
+                  ),
                 }}
               />
             </Box>
 
-            <FormControl size="small" sx={{ minWidth: 160 }}>
+            <FormControl size="small" sx={{ minWidth: 150 }}>
               <InputLabel>Role Filter</InputLabel>
               <Select
                 value={filterRole}
@@ -469,8 +503,8 @@ export const UsersPage: React.FC = () => {
                 onChange={(e) => setFilterRole(e.target.value)}
               >
                 <MenuItem value="ALL">All Roles</MenuItem>
-                <MenuItem value="admin">Administrator</MenuItem>
-                <MenuItem value="user">Revenue Collector</MenuItem>
+                <MenuItem value="admin">Administrators</MenuItem>
+                <MenuItem value="user">Collectors</MenuItem>
               </Select>
             </FormControl>
 
@@ -493,20 +527,21 @@ export const UsersPage: React.FC = () => {
 
         <TableContainer sx={{ maxHeight: 600 }}>
           <Table stickyHeader>
-            <TableHead>
+            <TableHead sx={{ bgcolor: '#f8fafc' }}>
               <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>User</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>User Name</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Position & Office</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Email Address</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Assigned Role</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>System Role</TableCell>
                 <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Registration Date</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Last Login / Created</TableCell>
                 <TableCell align="right" sx={{ fontWeight: 'bold' }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
                     <CircularProgress size={32} />
                   </TableCell>
                 </TableRow>
@@ -528,6 +563,14 @@ export const UsersPage: React.FC = () => {
                           </Typography>
                         </Box>
                       </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight="600" sx={{ color: '#1e293b' }}>
+                        {u.position || 'Revenue Staff'}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: '#64748b' }}>
+                        {u.department || 'Treasury Office'}
+                      </Typography>
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600, color: '#334155' }}>
                       {u.email}
@@ -552,12 +595,26 @@ export const UsersPage: React.FC = () => {
                         sx={{
                           fontWeight: 700,
                           bgcolor: u.status === 'Inactive' ? '#fef2f2' : '#ecfdf5',
-                          color: u.status === 'Inactive' ? '#b91c1c' : '#047857'
+                          color: u.status === 'Inactive' ? '#b91c1c' : '#047857',
+                          border: u.status === 'Inactive' ? '1px solid #fecaca' : '1px solid #a7f3d0'
                         }}
                       />
                     </TableCell>
                     <TableCell sx={{ color: '#64748b', fontSize: '0.85rem' }}>
-                      {u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '-'}
+                      {u.lastLogin ? (
+                        <>
+                          <Typography variant="caption" display="block" fontWeight="600" color="text.primary">
+                            {new Date(u.lastLogin).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {new Date(u.lastLogin).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </Typography>
+                        </>
+                      ) : u.createdAt ? (
+                        <Typography variant="caption" color="text.secondary">
+                          Registered: {new Date(u.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                        </Typography>
+                      ) : '-'}
                     </TableCell>
                     <TableCell align="right">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -589,7 +646,7 @@ export const UsersPage: React.FC = () => {
               })}
               {filteredUsers.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 6 }}>
+                  <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
                     <SupervisorAccount sx={{ color: '#94a3b8', fontSize: 44, mb: 1 }} />
                     <Typography color="text.secondary" fontWeight="600">
                       No user accounts found matching current search.
@@ -606,39 +663,51 @@ export const UsersPage: React.FC = () => {
           count={filteredUsers.length}
           rowsPerPage={rowsPerPage}
           page={page}
-          onPageChange={(_, p) => setPage(p)}
-          onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+          onPageChange={(_, newPage) => setPage(newPage)}
+          onRowsPerPageChange={(e) => {
+            setRowsPerPage(parseInt(e.target.value, 10));
+            setPage(0);
+          }}
           labelRowsPerPage="Users per page:"
         />
       </Paper>
 
-      {/* User Create / Edit Dialog */}
+      {/* Add / Edit Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle component="div" sx={{ bgcolor: '#f0f9ff', color: '#0369a1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', p: 2.5, borderBottom: '1px solid rgba(14, 165, 233, 0.12)' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Avatar sx={{ bgcolor: '#0284c7', width: 36, height: 36 }}>
-              {isEditing ? <Edit fontSize="small" /> : <PersonAdd fontSize="small" />}
-            </Avatar>
-            <Typography variant="h6" fontWeight="800">
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1.5, bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', p: 2.5 }}>
+          <Box sx={{ width: 36, height: 36, bgcolor: '#0284c7', color: '#ffffff', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {isEditing ? <Edit /> : <PersonAdd />}
+          </Box>
+          <Box>
+            <Typography variant="h6" fontWeight="800" sx={{ color: '#0f172a', lineHeight: 1.2 }}>
               {isEditing ? 'Edit User Profile' : 'Add New User Profile'}
             </Typography>
+            <Typography variant="caption" sx={{ color: '#64748b' }}>
+              {isEditing ? 'Modify user credentials and privileges in public.users' : 'Register a new municipal revenue collector or admin in public.users'}
+            </Typography>
           </Box>
-          <Tooltip title="Close" arrow>
-            <IconButton onClick={handleCloseDialog} size="small">
-              <Clear />
-            </IconButton>
-          </Tooltip>
         </DialogTitle>
         <DialogContent sx={{ p: 3, pt: 3.5 }}>
           <Grid container spacing={2.5} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 12 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
-                label="Full Name"
+                label="First Name"
                 fullWidth
                 size="small"
-                value={formData.fullName}
-                onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                placeholder="e.g. Maria Santos, CPA"
+                value={formData.firstName}
+                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                placeholder="e.g. Maria"
+                required
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="Last Name"
+                fullWidth
+                size="small"
+                value={formData.lastName}
+                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                placeholder="e.g. Santos"
                 required
               />
             </Grid>
@@ -652,6 +721,38 @@ export const UsersPage: React.FC = () => {
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="e.g. maria.santos@rcd.gov.ph"
                 required
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <Autocomplete
+                freeSolo
+                size="small"
+                options={lguDepartments.map(d => d.departmentName)}
+                value={formData.department}
+                onInputChange={(_, newInputValue) => {
+                  setFormData({ ...formData, department: newInputValue });
+                }}
+                onChange={(_, newValue) => {
+                  setFormData({ ...formData, department: newValue || '' });
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Department / Office"
+                    placeholder="e.g. Municipal Treasurer Office"
+                    helperText="Only Municipal Treasurer Office users can sign in"
+                  />
+                )}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="Position / Title"
+                fullWidth
+                size="small"
+                value={formData.position}
+                onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                placeholder="e.g. Revenue Collection Clerk II"
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -680,28 +781,27 @@ export const UsersPage: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-            {!isEditing && (
-              <Grid size={{ xs: 12 }}>
-                <TextField
-                  label="Temporary Password"
-                  type="password"
-                  fullWidth
-                  size="small"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="Create user login password"
-                  slotProps={{
-                    input: {
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <VpnKey fontSize="small" sx={{ color: '#0284c7' }} />
-                        </InputAdornment>
-                      ),
-                    }
-                  }}
-                />
-              </Grid>
-            )}
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                label={isEditing ? "Password (leave blank to keep current)" : "Default Login Password"}
+                type="password"
+                fullWidth
+                size="small"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder={isEditing ? "Enter new password if updating" : "Set initial login password"}
+                required={!isEditing}
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <VpnKey fontSize="small" sx={{ color: '#0284c7' }} />
+                      </InputAdornment>
+                    ),
+                  }
+                }}
+              />
+            </Grid>
           </Grid>
         </DialogContent>
         <DialogActions sx={{ p: 2.5, bgcolor: '#f8fafc', borderTop: '1px solid rgba(14, 165, 233, 0.08)', gap: 1.5 }}>
@@ -714,7 +814,7 @@ export const UsersPage: React.FC = () => {
           <Tooltip title={isEditing ? 'Update User' : 'Save User'} arrow>
             <IconButton
               onClick={handleSave}
-              disabled={loading || !formData.fullName || !formData.email}
+              disabled={loading || !formData.firstName || !formData.lastName || !formData.email || (!isEditing && !formData.password)}
               sx={{
                 bgcolor: '#0284c7',
                 color: '#ffffff',

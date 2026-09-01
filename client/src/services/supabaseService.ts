@@ -19,6 +19,8 @@ export interface CollectionItem {
   amount: number;
   date: string;
   remarks: string;
+  collectorEmail?: string;
+  userId?: string;
 }
 
 export interface CollectionHeader {
@@ -36,23 +38,73 @@ export interface CollectionCharge {
   amount: number;
 }
 
+/**
+ * Helper to fetch ALL rows from Supabase, removing the default 1000-row limit
+ * by retrieving all pages in chunks of 1000 until all records are returned.
+ */
+async function fetchAllRows<T = any>(
+  queryFn: (from: number, to: number) => Promise<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const CHUNK_SIZE = 1000;
+  let allRows: T[] = [];
+  let from = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const to = from + CHUNK_SIZE - 1;
+    const { data, error } = await queryFn(from, to);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allRows = allRows.concat(data);
+    if (data.length < CHUNK_SIZE) {
+      hasMore = false;
+    } else {
+      from += CHUNK_SIZE;
+    }
+  }
+
+  return allRows;
+};
+
+export const getCurrentLocalUser = () => {
+  const stored = localStorage.getItem('rcd_user');
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch {}
+  }
+  return null;
+};
+
+export const isValidUuid = (id: any): boolean =>
+  typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+export const isCurrentUserAdmin = (): boolean => {
+  const user = getCurrentLocalUser();
+  if (!user) return false;
+  const role = user.role?.toLowerCase();
+  return role === 'admin' || role === 'administrator';
+};
+
 // ============================================================================
 // 1. RCD REPORTS (Table: rcd_reports)
 // ============================================================================
 
 export const submitRCDReport = async (report: RCDReport): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not authenticated');
-
       const { error } = await supabase
         .from('rcd_reports')
         .insert({
-          user_id: user.id,
+          user_id: userId,
+          collector_email: collectorEmail,
           report_number: report.reportNumber,
           date: report.date || new Date().toISOString().split('T')[0],
-          collector_name: report.collectorName || user.user_metadata?.full_name || user.email,
+          collector_name: report.collectorName || user?.name || user?.email || 'Revenue Collector',
           fund_type: report.fundType,
           collections: report.collections,
           total_collection: report.totalCollection,
@@ -74,7 +126,7 @@ export const submitRCDReport = async (report: RCDReport): Promise<boolean> => {
   // Fallback to localStorage
   try {
     const existingReports = JSON.parse(localStorage.getItem('rcd_reports') || '[]');
-    const newReports = [report, ...existingReports];
+    const newReports = [{ ...report, collectorEmail, userId }, ...existingReports];
     localStorage.setItem('rcd_reports', JSON.stringify(newReports));
     return true;
   } catch (e) {
@@ -84,21 +136,55 @@ export const submitRCDReport = async (report: RCDReport): Promise<boolean> => {
 };
 
 export const getRecentReports = async (): Promise<RCDReport[]> => {
+  const user = getCurrentLocalUser();
+  const isAdmin = isCurrentUserAdmin();
+  const userEmail = user?.email?.toLowerCase().trim();
+  const userName = user?.name?.toLowerCase().trim();
+
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('rcd_reports')
-        .select('*')
-        .order('created_at', { ascending: false });
+      let data = await fetchAllRows(async (from, to) => {
+        let query = supabase
+          .from('rcd_reports')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (error) throw error;
+        if (!isAdmin) {
+          const filterParts: string[] = [];
+          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
+          if (filterParts.length > 0) {
+            query = query.or(filterParts.join(','));
+          }
+        }
 
-      if (data) {
+        return await query.range(from, to);
+      });
+
+      if (data && data.length > 0) {
+        // Enforce strict collector isolation if not admin
+        if (!isAdmin && user) {
+          data = data.filter((row: any) => {
+            const rowEmail = row.collector_email?.toLowerCase().trim();
+            const rowUserId = row.user_id;
+            const rowCollector = row.collector_name?.toLowerCase().trim();
+
+            if (rowEmail && userEmail) return rowEmail === userEmail;
+            if (rowUserId && user.id) return rowUserId === user.id;
+            if (rowCollector && (userName || userEmail)) {
+              return (userName && rowCollector.includes(userName)) || (userEmail && rowCollector.includes(userEmail));
+            }
+            return false;
+          });
+        }
+
         return data.map((row: any) => ({
           id: row.id,
           date: row.date,
           reportNumber: row.report_number,
           collectorName: row.collector_name,
+          collectorEmail: row.collector_email || undefined,
+          userId: row.user_id || undefined,
           fundType: row.fund_type,
           collections: row.collections || [],
           totalCollection: parseFloat(row.total_collection || 0),
@@ -113,7 +199,22 @@ export const getRecentReports = async (): Promise<RCDReport[]> => {
   }
 
   try {
-    return JSON.parse(localStorage.getItem('rcd_reports') || '[]');
+    const local = JSON.parse(localStorage.getItem('rcd_reports') || '[]');
+    if (!isAdmin && user) {
+      return local.filter((r: any) => {
+        const rEmail = r.collectorEmail?.toLowerCase().trim();
+        const rUserId = r.userId;
+        const rCollector = r.collectorName?.toLowerCase().trim();
+
+        if (rEmail && userEmail) return rEmail === userEmail;
+        if (rUserId && user.id) return rUserId === user.id;
+        if (rCollector && (userName || userEmail)) {
+          return (userName && rCollector.includes(userName)) || (userEmail && rCollector.includes(userEmail));
+        }
+        return false;
+      });
+    }
+    return local;
   } catch {
     return [];
   }
@@ -151,12 +252,15 @@ export const deleteReport = async (id: string): Promise<boolean> => {
 export const getAccountCodes = async (): Promise<AccountCode[]> => {
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('rcd_account_codes')
-        .select('*')
-        .order('id', { ascending: true });
+      const data = await fetchAllRows(async (from, to) => {
+        return await supabase
+          .from('rcd_account_codes')
+          .select('*')
+          .order('id', { ascending: true })
+          .range(from, to);
+      });
 
-      if (!error && data) {
+      if (data && data.length > 0) {
         return data.map((row: any) => ({
           id: row.id,
           mainCategory: row.main_category,
@@ -182,8 +286,8 @@ export const getAccountCodes = async (): Promise<AccountCode[]> => {
 export const saveAccountCode = async (code: AccountCode): Promise<boolean> => {
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
+      const user = getCurrentLocalUser();
+      const userId = user?.id || null;
 
       if (code.id && code.id > 0) {
         // Try to update existing
@@ -200,7 +304,7 @@ export const saveAccountCode = async (code: AccountCode): Promise<boolean> => {
         const { error } = await supabase
           .from('rcd_account_codes')
           .insert({
-            user_id: user.id,
+            user_id: userId,
             main_category: code.mainCategory,
             sub_category: code.subCategory,
             code: code.code,
@@ -256,7 +360,7 @@ export const importAccountCodes = async (
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = getCurrentLocalUser();
       const userId = user?.id || null;
 
       if (replaceExisting) {
@@ -316,13 +420,80 @@ export interface CollectorSignatoryProfile {
   department: string;
 }
 
-export const getSignatories = async (): Promise<Signatory[]> => {
-  // Official municipal signatories defaults
+export const getOfficialSignatories = async (): Promise<Signatory[]> => {
   let officialMunicipalSignatories: Signatory[] = [
-    { id: 2, fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer', department: 'Office of the Municipal Treasurer', remarks: 'Municipal Treasurer / Verification & Acknowledgment' },
-    { id: 3, fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
-    { id: 4, fullName: 'HESTHER F. FANOGA', position: 'AA II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
+    { id: 44, fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer', department: 'Office of the Municipal Treasurer', remarks: 'Municipal Treasurer / Verification & Acknowledgment' },
+    { id: 45, fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
+    { id: 46, fullName: 'HESTHER F. FANOGA', position: 'AA II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
   ];
+
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('rcd_signatories')
+        .select('*')
+        .is('user_id', null)
+        .order('id', { ascending: true })
+        .limit(3);
+
+      if (!error && data && data.length > 0) {
+        officialMunicipalSignatories = data.map((row: any) => ({
+          id: row.id,
+          fullName: row.full_name,
+          position: row.position,
+          department: row.department,
+          remarks: row.remarks || '',
+        }));
+      } else {
+        // Auto-seed official municipal signatories into Supabase if empty
+        const defaultSignatories = [
+          {
+            user_id: null,
+            full_name: 'MENARD A. HERRERA',
+            position: 'Municipal Treasurer',
+            department: 'Office of the Municipal Treasurer',
+            remarks: 'Municipal Treasurer / Verification & Acknowledgment'
+          },
+          {
+            user_id: null,
+            full_name: 'LEON F. PAZ, JR.',
+            position: 'Municipal Accountant',
+            department: 'Office of the Municipal Accountant',
+            remarks: 'Municipal Accountant / Certified Correct'
+          },
+          {
+            user_id: null,
+            full_name: 'HESTHER F. FANOGA',
+            position: 'AA II',
+            department: 'Office of the Municipal Accountant',
+            remarks: 'Accounting Staff / Prepared by'
+          }
+        ];
+        const { data: inserted } = await supabase.from('rcd_signatories').insert(defaultSignatories).select();
+        if (inserted && inserted.length > 0) {
+          officialMunicipalSignatories = inserted.map((row: any) => ({
+            id: row.id,
+            fullName: row.full_name,
+            position: row.position,
+            department: row.department,
+            remarks: row.remarks || '',
+          }));
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching official signatories from Supabase:', e);
+    }
+  }
+
+  try {
+    localStorage.setItem('official_signatories', JSON.stringify(officialMunicipalSignatories));
+  } catch {}
+
+  return officialMunicipalSignatories;
+};
+
+export const getSignatories = async (): Promise<Signatory[]> => {
+  let officialMunicipalSignatories = await getOfficialSignatories();
 
   // Default / fallback collector certification signatory
   let certSignatory: Signatory = {
@@ -358,50 +529,36 @@ export const getSignatories = async (): Promise<Signatory[]> => {
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
-      // 1. Fetch Global official municipal signatories (user_id is null)
-      const { data: globalData, error: globalErr } = await supabase
-        .from('rcd_signatories')
-        .select('*')
-        .is('user_id', null)
-        .order('id', { ascending: true });
-
-      if (!globalErr && globalData && globalData.length > 0) {
-        officialMunicipalSignatories = globalData.map((row: any) => ({
-          id: row.id,
-          fullName: row.full_name,
-          position: row.position,
-          department: row.department,
-          remarks: row.remarks || '',
-        }));
-      }
+      const user = getCurrentLocalUser();
 
       // 2. Fetch Personal Certification Signatory for logged-in collector
       if (user) {
-        if (user.user_metadata?.full_name && certSignatory.fullName === 'ACCOUNTABLE OFFICER') {
-          certSignatory.fullName = user.user_metadata.full_name.toUpperCase();
+        if (user.name && certSignatory.fullName === 'ACCOUNTABLE OFFICER') {
+          certSignatory.fullName = user.name.toUpperCase();
         }
 
-        const { data: userData, error: userErr } = await supabase
-          .from('rcd_signatories')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('id', { ascending: false })
-          .limit(1);
+        const userUuid = isValidUuid(user.id) ? user.id : null;
+        if (userUuid) {
+          const { data: userData, error: userErr } = await supabase
+            .from('rcd_signatories')
+            .select('*')
+            .eq('user_id', userUuid)
+            .order('id', { ascending: false })
+            .limit(1);
 
-        if (!userErr && userData && userData.length > 0) {
-          certSignatory = {
-            id: userData[0].id,
-            fullName: (userData[0].full_name || certSignatory.fullName).toUpperCase(),
-            position: userData[0].position || certSignatory.position,
-            department: userData[0].department || certSignatory.department,
-            remarks: userData[0].remarks || "Treasurer's Office Staff / Certification",
-          };
+          if (!userErr && userData && userData.length > 0) {
+            certSignatory = {
+              id: userData[0].id,
+              fullName: (userData[0].full_name || certSignatory.fullName).toUpperCase(),
+              position: userData[0].position || certSignatory.position,
+              department: userData[0].department || certSignatory.department,
+              remarks: userData[0].remarks || "Treasurer's Office Staff / Certification",
+            };
 
-          // Cache in local storage for instant access across tabs/views
-          localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify(certSignatory));
-          localStorage.setItem('user_cert_signatory_default', JSON.stringify(certSignatory));
+            // Cache in local storage for instant access across tabs/views
+            localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify(certSignatory));
+            localStorage.setItem('user_cert_signatory_default', JSON.stringify(certSignatory));
+          }
         }
       }
     } catch (e) {
@@ -415,7 +572,11 @@ export const getSignatories = async (): Promise<Signatory[]> => {
     s.position?.toLowerCase() !== 'revenue collection clerk i'
   );
 
-  return [certSignatory, ...filteredOfficials];
+  const combined = [certSignatory, ...filteredOfficials];
+  try {
+    localStorage.setItem('signatories', JSON.stringify(combined));
+  } catch {}
+  return combined;
 };
 
 export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatoryProfile> => {
@@ -449,33 +610,36 @@ export const getCollectorSignatoryProfile = async (): Promise<CollectorSignatory
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = getCurrentLocalUser();
       if (user) {
-        if (!defaultProfile.accountableName && user.user_metadata?.full_name) {
-          defaultProfile.accountableName = user.user_metadata.full_name;
+        if (!defaultProfile.accountableName && user.name) {
+          defaultProfile.accountableName = user.name;
         }
 
-        const { data, error } = await supabase
-          .from('rcd_signatories')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('id', { ascending: false })
-          .limit(1);
+        const userUuid = isValidUuid(user.id) ? user.id : null;
+        if (userUuid) {
+          const { data, error } = await supabase
+            .from('rcd_signatories')
+            .select('*')
+            .eq('user_id', userUuid)
+            .order('id', { ascending: false })
+            .limit(1);
 
-        if (!error && data && data.length > 0) {
-          const profile = {
-            accountableName: data[0].full_name || defaultProfile.accountableName,
-            position: data[0].position || defaultProfile.position,
-            department: data[0].department || defaultProfile.department,
-          };
-          localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify({
-            id: data[0].id,
-            fullName: profile.accountableName.toUpperCase(),
-            position: profile.position,
-            department: profile.department,
-            remarks: "Treasurer's Office Staff / Certification"
-          }));
-          return profile;
+          if (!error && data && data.length > 0) {
+            const profile = {
+              accountableName: data[0].full_name || defaultProfile.accountableName,
+              position: data[0].position || defaultProfile.position,
+              department: data[0].department || defaultProfile.department,
+            };
+            localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify({
+              id: data[0].id,
+              fullName: profile.accountableName.toUpperCase(),
+              position: profile.position,
+              department: profile.department,
+              remarks: "Treasurer's Office Staff / Certification"
+            }));
+            return profile;
+          }
         }
       }
     } catch (e) {
@@ -514,17 +678,25 @@ export const saveCollectorSignatoryProfile = async (profile: CollectorSignatoryP
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = getCurrentLocalUser();
       if (user) {
         localStorage.setItem(`user_cert_signatory_${user.id}`, JSON.stringify(signatoryObj));
+        const userUuid = isValidUuid(user.id) ? user.id : null;
 
-        const { data: existing, error: findErr } = await supabase
-          .from('rcd_signatories')
-          .select('id')
-          .eq('user_id', user.id)
-          .limit(1);
+        let existingId: number | null = null;
+        if (userUuid) {
+          const { data: existing, error: findErr } = await supabase
+            .from('rcd_signatories')
+            .select('id')
+            .eq('user_id', userUuid)
+            .limit(1);
 
-        if (!findErr && existing && existing.length > 0) {
+          if (!findErr && existing && existing.length > 0) {
+            existingId = existing[0].id;
+          }
+        }
+
+        if (existingId) {
           const { error } = await supabase
             .from('rcd_signatories')
             .update({
@@ -533,13 +705,13 @@ export const saveCollectorSignatoryProfile = async (profile: CollectorSignatoryP
               department: departmentToSave,
               remarks: "Treasurer's Office Staff / Certification",
             })
-            .eq('id', existing[0].id);
+            .eq('id', existingId);
           if (error) throw error;
         } else {
           const { error } = await supabase
             .from('rcd_signatories')
             .insert({
-              user_id: user.id,
+              user_id: userUuid,
               full_name: nameToSave,
               position: positionToSave,
               department: departmentToSave,
@@ -560,7 +732,7 @@ export const saveCollectorSignatoryProfile = async (profile: CollectorSignatoryP
 export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {
   const isCertification = signatory.id === 1 || 
     signatory.remarks?.toLowerCase().includes('certification') ||
-    (signatory.department.toLowerCase().includes('treasurer') && !signatory.position.toLowerCase().includes('municipal treasurer'));
+    (signatory.department?.toLowerCase().includes('treasurer') && !signatory.position?.toLowerCase().includes('municipal treasurer'));
 
   if (isCertification) {
     return saveCollectorSignatoryProfile({
@@ -573,15 +745,45 @@ export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {
   if (isSupabaseConfigured()) {
     try {
       if (signatory.id && signatory.id > 0) {
+        const { data: existing, error: checkErr } = await supabase
+          .from('rcd_signatories')
+          .select('id')
+          .eq('id', signatory.id)
+          .limit(1);
+
+        if (!checkErr && existing && existing.length > 0) {
+          const { error } = await supabase
+            .from('rcd_signatories')
+            .update({
+              full_name: signatory.fullName,
+              position: signatory.position,
+              department: signatory.department,
+              remarks: signatory.remarks || '',
+            })
+            .eq('id', signatory.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from('rcd_signatories')
+            .insert({
+              full_name: signatory.fullName,
+              position: signatory.position,
+              department: signatory.department,
+              remarks: signatory.remarks || '',
+              user_id: null
+            });
+          if (error) throw error;
+        }
+      } else {
         const { error } = await supabase
           .from('rcd_signatories')
-          .update({
+          .insert({
             full_name: signatory.fullName,
             position: signatory.position,
             department: signatory.department,
             remarks: signatory.remarks || '',
-          })
-          .eq('id', signatory.id);
+            user_id: null
+          });
         if (error) throw error;
       }
       return true;
@@ -612,16 +814,20 @@ export const deleteSignatory = async (id: number): Promise<boolean> => {
         .from('rcd_signatories')
         .delete()
         .eq('id', id);
-      if (error) throw error;
-      return true;
+      if (error) {
+        console.error('Error deleting signatory from Supabase:', error);
+      }
     } catch (e) {
       console.error('Error deleting signatory from Supabase:', e);
     }
   }
 
-  const current = JSON.parse(localStorage.getItem('signatories') || '[]');
-  const newSignatories = current.filter((s: Signatory) => s.id !== id);
-  localStorage.setItem('signatories', JSON.stringify(newSignatories));
+  try {
+    const current = JSON.parse(localStorage.getItem('signatories') || '[]');
+    const newSignatories = current.filter((s: Signatory) => s.id !== id);
+    localStorage.setItem('signatories', JSON.stringify(newSignatories));
+  } catch {}
+
   return true;
 };
 
@@ -630,18 +836,50 @@ export const deleteSignatory = async (id: number): Promise<boolean> => {
 // ============================================================================
 
 export const getCollectionEntries = async (): Promise<CollectionItem[]> => {
+  const user = getCurrentLocalUser();
+  const isAdmin = isCurrentUserAdmin();
+  const userEmail = user?.email?.toLowerCase().trim();
+
+  let remoteItems: CollectionItem[] = [];
+
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('rcd_collections')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('or_no', { ascending: false });
+      let data = await fetchAllRows(async (from, to) => {
+        let query = supabase
+          .from('rcd_collections')
+          .select('*')
+          .order('date', { ascending: false })
+          .order('or_no', { ascending: false });
 
-      if (error) throw error;
+        if (!isAdmin) {
+          const filterParts: string[] = [];
+          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
+          if (filterParts.length > 0) {
+            query = query.or(filterParts.join(','));
+          }
+        }
+
+        return await query.range(from, to);
+      });
 
       if (data) {
-        return data.map((row: any) => ({
+        if (!isAdmin && user) {
+          data = data.filter((row: any) => {
+            const rowEmail = row.collector_email?.toLowerCase().trim();
+            const rowUserId = row.user_id;
+
+            if (rowEmail && userEmail) {
+              return rowEmail === userEmail;
+            }
+            if (rowUserId && user.id) {
+              return rowUserId === user.id;
+            }
+            return false;
+          });
+        }
+
+        remoteItems = data.map((row: any) => ({
           id: row.id,
           afNo: row.af_no || '',
           orNo: row.or_no || '',
@@ -652,27 +890,54 @@ export const getCollectionEntries = async (): Promise<CollectionItem[]> => {
           amount: parseFloat(row.amount || 0),
           date: row.date || '',
           remarks: row.remarks || '',
+          collectorEmail: row.collector_email || undefined,
+          userId: row.user_id || undefined,
         }));
+
+        // Update local cache to match remote data exactly (prevents deleted rows from reviving)
+        try {
+          localStorage.setItem('collection_entries', JSON.stringify(remoteItems));
+        } catch {}
+
+        return remoteItems;
       }
     } catch (e) {
       console.warn('Error fetching collections from Supabase:', e);
     }
   }
 
+  // Fallback to local storage ONLY if Supabase is offline or failed
   const stored = localStorage.getItem('collection_entries');
-  return stored ? JSON.parse(stored) : [];
+  if (stored) {
+    try {
+      const localList: CollectionItem[] = JSON.parse(stored);
+      return (!isAdmin && user)
+        ? localList.filter(item => {
+            const itemEmail = item.collectorEmail?.toLowerCase().trim();
+            const itemUserId = item.userId;
+            if (itemEmail && userEmail) return itemEmail === userEmail;
+            if (itemUserId && user.id) return itemUserId === user.id;
+            return false;
+          })
+        : localList;
+    } catch {}
+  }
+
+  return [];
 };
 
 export const saveCollectionEntry = async (entry: CollectionItem): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
       const { error } = await supabase
         .from('rcd_collections')
         .insert({
-          user_id: user.id,
+          user_id: userId,
+          collector_email: collectorEmail,
           af_no: entry.afNo,
           or_no: entry.orNo,
           payor: entry.payor,
@@ -684,17 +949,20 @@ export const saveCollectionEntry = async (entry: CollectionItem): Promise<boolea
           remarks: entry.remarks,
         });
 
-      if (error) throw error;
-      return true;
+      if (error) {
+        console.error('Error saving collection to Supabase:', error);
+      } else {
+        return true;
+      }
     } catch (e) {
       console.error('Error saving collection to Supabase:', e);
     }
   }
 
-  // Fallback
-  const current = await getCollectionEntries();
-  const nextId = current.length > 0 ? Math.max(...current.map(c => c.id)) + 1 : 1;
-  const updated = [{ ...entry, id: entry.id || nextId }, ...current];
+  // Fallback / local backup
+  const current = JSON.parse(localStorage.getItem('collection_entries') || '[]');
+  const nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
+  const updated = [{ ...entry, id: entry.id || nextId, collectorEmail, userId }, ...current];
   localStorage.setItem('collection_entries', JSON.stringify(updated));
   return true;
 };
@@ -703,13 +971,15 @@ export const saveCollectionEntryBulk = async (
   header: CollectionHeader,
   charges: CollectionCharge[]
 ): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
       const rows = charges.map(c => ({
-        user_id: user.id,
+        user_id: userId,
+        collector_email: collectorEmail,
         af_no: header.afNo,
         or_no: header.orNo,
         payor: header.payor,
@@ -725,16 +995,17 @@ export const saveCollectionEntryBulk = async (
         .from('rcd_collections')
         .insert(rows);
 
-      if (error) throw error;
-      return true;
+      if (error) {
+        console.error('Error bulk saving collections to Supabase:', error);
+      }
     } catch (e) {
       console.error('Error bulk saving collections to Supabase:', e);
     }
   }
 
-  // Fallback
-  const current = await getCollectionEntries();
-  let nextId = current.length > 0 ? Math.max(...current.map(c => c.id)) + 1 : 1;
+  // Always keep local storage in sync as local cache / fallback
+  const current = JSON.parse(localStorage.getItem('collection_entries') || '[]');
+  let nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
   const newItems: CollectionItem[] = charges.map(c => ({
     id: nextId++,
     afNo: header.afNo,
@@ -746,6 +1017,8 @@ export const saveCollectionEntryBulk = async (
     amount: c.amount,
     date: header.date,
     remarks: header.remarks,
+    collectorEmail,
+    userId,
   }));
 
   localStorage.setItem('collection_entries', JSON.stringify([...newItems, ...current]));
@@ -756,14 +1029,15 @@ export const importCollectionsBatch = async (
   entries: Array<Omit<CollectionItem, 'id'>>
 ): Promise<{ success: boolean; count: number }> => {
   if (entries.length === 0) return { success: true, count: 0 };
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
       const rows = entries.map(e => ({
-        user_id: user.id,
+        user_id: userId,
+        collector_email: collectorEmail,
         af_no: e.afNo || '',
         or_no: e.orNo || '',
         payor: e.payor || '',
@@ -793,8 +1067,8 @@ export const importCollectionsBatch = async (
 
   // Fallback
   try {
-    const current = await getCollectionEntries();
-    let nextId = current.length > 0 ? Math.max(...current.map(c => c.id)) + 1 : 1;
+    const current = JSON.parse(localStorage.getItem('collection_entries') || '[]');
+    let nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
     const newItems: CollectionItem[] = entries.map(e => ({
       id: nextId++,
       afNo: e.afNo || '',
@@ -806,6 +1080,8 @@ export const importCollectionsBatch = async (
       amount: Number(e.amount) || 0,
       date: e.date || new Date().toISOString().split('T')[0],
       remarks: e.remarks || '',
+      collectorEmail,
+      userId,
     }));
 
     localStorage.setItem('collection_entries', JSON.stringify([...newItems, ...current]));
@@ -813,6 +1089,71 @@ export const importCollectionsBatch = async (
   } catch (err) {
     console.error('Failed to import to localStorage', err);
     return { success: false, count: 0 };
+  }
+};
+
+/**
+ * Pushes any locally stored collections up to Supabase if they are not yet stored on the remote database.
+ */
+export const syncPendingLocalCollectionsToSupabase = async (): Promise<number> => {
+  if (!isSupabaseConfigured()) return 0;
+  const stored = localStorage.getItem('collection_entries');
+  if (!stored) return 0;
+
+  try {
+    const localList: CollectionItem[] = JSON.parse(stored);
+    if (localList.length === 0) return 0;
+
+    const user = getCurrentLocalUser();
+    const userId = isValidUuid(user?.id) ? user.id : null;
+    const userEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
+    const remoteData = await fetchAllRows(async (from, to) => {
+      return await supabase
+        .from('rcd_collections')
+        .select('af_no, or_no, sub_category, amount, date')
+        .range(from, to);
+    });
+
+    const remoteKeys = new Set(
+      (remoteData || []).map((r: any) => `${r.af_no}_${r.or_no}_${r.sub_category}_${parseFloat(r.amount || 0)}_${r.date}`)
+    );
+
+    const toUpload = localList.filter(l =>
+      !remoteKeys.has(`${l.afNo}_${l.orNo}_${l.subCategory}_${Number(l.amount || 0)}_${l.date}`)
+    );
+
+    if (toUpload.length === 0) return 0;
+
+    const rows = toUpload.map(e => ({
+      user_id: isValidUuid(e.userId) ? e.userId : userId,
+      collector_email: e.collectorEmail || userEmail,
+      af_no: e.afNo || '',
+      or_no: e.orNo || '',
+      payor: e.payor || '',
+      sub_category: e.subCategory || '',
+      main_category: e.mainCategory || '',
+      account_code: e.accountCode || '',
+      amount: Number(e.amount) || 0,
+      date: e.date || new Date().toISOString().split('T')[0],
+      remarks: e.remarks || '',
+    }));
+
+    const chunkSize = 500;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error } = await supabase.from('rcd_collections').insert(chunk);
+      if (error) {
+        console.error('Error syncing local collections to Supabase:', error);
+        return 0;
+      }
+    }
+
+    console.log(`Successfully synced ${toUpload.length} local collections to Supabase!`);
+    return toUpload.length;
+  } catch (err) {
+    console.error('Failed to sync local collections to Supabase:', err);
+    return 0;
   }
 };
 
@@ -863,30 +1204,41 @@ export const deleteCollectionGroup = async (ids: number[], afNo?: string, orNo?:
           .from('rcd_collections')
           .delete()
           .in('id', ids);
-        if (error) throw error;
-        return true;
+        if (error) {
+          console.error('Error deleting collection group from Supabase:', error);
+        }
       } else if (afNo && orNo) {
         const { error } = await supabase
           .from('rcd_collections')
           .delete()
           .eq('af_no', afNo)
           .eq('or_no', orNo);
-        if (error) throw error;
-        return true;
+        if (error) {
+          console.error('Error deleting collection group from Supabase:', error);
+        }
       }
     } catch (e) {
       console.error('Error deleting collection group from Supabase:', e);
     }
   }
 
-  const current = await getCollectionEntries();
-  const idSet = new Set(ids || []);
-  const filtered = current.filter(c => {
-    if (idSet.has(c.id)) return false;
-    if (afNo && orNo && c.afNo === afNo && c.orNo === orNo) return false;
-    return true;
-  });
-  localStorage.setItem('collection_entries', JSON.stringify(filtered));
+  // Always remove deleted items from local storage as well
+  try {
+    const stored = localStorage.getItem('collection_entries');
+    if (stored) {
+      const current: CollectionItem[] = JSON.parse(stored);
+      const idSet = new Set(ids || []);
+      const filtered = current.filter(c => {
+        if (idSet.has(c.id)) return false;
+        if (afNo && orNo && c.afNo === afNo && c.orNo === orNo) return false;
+        return true;
+      });
+      localStorage.setItem('collection_entries', JSON.stringify(filtered));
+    }
+  } catch (err) {
+    console.error('Error updating local storage after delete:', err);
+  }
+
   return true;
 };
 
@@ -906,18 +1258,50 @@ export const updateCollectionGroup = async (
 // ============================================================================
 
 export const getRPTCollections = async (): Promise<RPTCollectionItem[]> => {
+  const user = getCurrentLocalUser();
+  const isAdmin = isCurrentUserAdmin();
+  const userEmail = user?.email?.toLowerCase().trim();
+
+  let remoteItems: RPTCollectionItem[] = [];
+
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('rcd_rpt_collections')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('or_number', { ascending: false });
+      let data = await fetchAllRows(async (from, to) => {
+        let query = supabase
+          .from('rcd_rpt_collections')
+          .select('*')
+          .order('date', { ascending: false })
+          .order('or_number', { ascending: false });
 
-      if (error) throw error;
+        if (!isAdmin) {
+          const filterParts: string[] = [];
+          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
+          if (filterParts.length > 0) {
+            query = query.or(filterParts.join(','));
+          }
+        }
+
+        return await query.range(from, to);
+      });
 
       if (data) {
-        return data.map((row: any) => ({
+        if (!isAdmin && user) {
+          data = data.filter((row: any) => {
+            const rowEmail = row.collector_email?.toLowerCase().trim();
+            const rowUserId = row.user_id;
+
+            if (rowEmail && userEmail) {
+              return rowEmail === userEmail;
+            }
+            if (rowUserId && user.id) {
+              return rowUserId === user.id;
+            }
+            return false;
+          });
+        }
+
+        remoteItems = data.map((row: any) => ({
           id: row.id,
           af56Id: row.af56_id || '',
           orNumber: row.or_number || '',
@@ -929,29 +1313,56 @@ export const getRPTCollections = async (): Promise<RPTCollectionItem[]> => {
           amount: parseFloat(row.amount || 0),
           date: row.date || '',
           remarks: row.remarks || '',
+          collectorEmail: row.collector_email || undefined,
+          userId: row.user_id || undefined,
         }));
+
+        // Update local cache to match remote data exactly (prevents deleted rows from reviving)
+        try {
+          localStorage.setItem('rpt_collections', JSON.stringify(remoteItems));
+        } catch {}
+
+        return remoteItems;
       }
     } catch (e) {
       console.warn('Error fetching RPT collections from Supabase:', e);
     }
   }
 
+  // Fallback to local storage ONLY if Supabase is offline or failed
   const stored = localStorage.getItem('rpt_collections');
-  return stored ? JSON.parse(stored) : [];
+  if (stored) {
+    try {
+      const localList: RPTCollectionItem[] = JSON.parse(stored);
+      return (!isAdmin && user)
+        ? localList.filter(item => {
+            const itemEmail = item.collectorEmail?.toLowerCase().trim();
+            const itemUserId = item.userId;
+            if (itemEmail && userEmail) return itemEmail === userEmail;
+            if (itemUserId && user.id) return itemUserId === user.id;
+            return false;
+          })
+        : localList;
+    } catch {}
+  }
+
+  return [];
 };
 
 export const saveRPTCollection = async (collection: RPTCollectionItem): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
       if (collection.id && collection.id > 0) {
         const { error } = await supabase
           .from('rcd_rpt_collections')
           .upsert({
             id: collection.id,
-            user_id: user.id,
+            user_id: userId,
+            collector_email: collectorEmail,
             af56_id: collection.af56Id,
             or_number: collection.orNumber,
             payor: collection.payor,
@@ -963,12 +1374,17 @@ export const saveRPTCollection = async (collection: RPTCollectionItem): Promise<
             date: collection.date,
             remarks: collection.remarks || '',
           });
-        if (error) throw error;
+        if (error) {
+          console.error('Error upserting RPT collection to Supabase:', error);
+        } else {
+          return true;
+        }
       } else {
         const { error } = await supabase
           .from('rcd_rpt_collections')
           .insert({
-            user_id: user.id,
+            user_id: userId,
+            collector_email: collectorEmail,
             af56_id: collection.af56Id,
             or_number: collection.orNumber,
             payor: collection.payor,
@@ -980,24 +1396,27 @@ export const saveRPTCollection = async (collection: RPTCollectionItem): Promise<
             date: collection.date,
             remarks: collection.remarks || '',
           });
-        if (error) throw error;
+        if (error) {
+          console.error('Error inserting RPT collection to Supabase:', error);
+        } else {
+          return true;
+        }
       }
-      return true;
     } catch (e) {
       console.error('Error saving RPT collection to Supabase:', e);
     }
   }
 
   // Fallback
-  const current = await getRPTCollections();
-  const index = current.findIndex(c => c.id === collection.id);
+  const current = JSON.parse(localStorage.getItem('rpt_collections') || '[]');
+  const index = current.findIndex((c: any) => c.id === collection.id);
   let updated;
   if (index >= 0) {
     updated = [...current];
-    updated[index] = collection;
+    updated[index] = { ...collection, collectorEmail, userId };
   } else {
-    const nextId = current.length > 0 ? Math.max(...current.map(c => c.id)) + 1 : 1;
-    updated = [{ ...collection, id: collection.id || nextId }, ...current];
+    const nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
+    updated = [{ ...collection, id: collection.id || nextId, collectorEmail, userId }, ...current];
   }
   localStorage.setItem('rpt_collections', JSON.stringify(updated));
   return true;
@@ -1007,14 +1426,15 @@ export const importRPTCollectionsBatch = async (
   entries: Array<Omit<RPTCollectionItem, 'id'>>
 ): Promise<{ success: boolean; count: number }> => {
   if (entries.length === 0) return { success: true, count: 0 };
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
 
   if (isSupabaseConfigured()) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
       const rows = entries.map(e => ({
-        user_id: user.id,
+        user_id: userId,
+        collector_email: collectorEmail,
         af56_id: e.af56Id || '',
         or_number: e.orNumber || '',
         payor: e.payor || '',
@@ -1045,8 +1465,8 @@ export const importRPTCollectionsBatch = async (
 
   // Fallback
   try {
-    const current = await getRPTCollections();
-    let nextId = current.length > 0 ? Math.max(...current.map(c => c.id)) + 1 : 1;
+    const current = JSON.parse(localStorage.getItem('rpt_collections') || '[]');
+    let nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
     const newItems: RPTCollectionItem[] = entries.map(e => ({
       id: nextId++,
       af56Id: e.af56Id || '',
@@ -1059,6 +1479,8 @@ export const importRPTCollectionsBatch = async (
       amount: Number(e.amount) || 0,
       date: e.date || new Date().toISOString().split('T')[0],
       remarks: e.remarks || '',
+      collectorEmail,
+      userId,
     }));
 
     localStorage.setItem('rpt_collections', JSON.stringify([...newItems, ...current]));
@@ -1066,6 +1488,72 @@ export const importRPTCollectionsBatch = async (
   } catch (err) {
     console.error('Failed to import RPT to localStorage', err);
     return { success: false, count: 0 };
+  }
+};
+
+/**
+ * Pushes any locally stored RPT collections up to Supabase if they are not yet stored on the remote database.
+ */
+export const syncPendingLocalRPTCollectionsToSupabase = async (): Promise<number> => {
+  if (!isSupabaseConfigured()) return 0;
+  const stored = localStorage.getItem('rpt_collections');
+  if (!stored) return 0;
+
+  try {
+    const localList: RPTCollectionItem[] = JSON.parse(stored);
+    if (localList.length === 0) return 0;
+
+    const user = getCurrentLocalUser();
+    const userId = isValidUuid(user?.id) ? user.id : null;
+    const userEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
+    const remoteData = await fetchAllRows(async (from, to) => {
+      return await supabase
+        .from('rcd_rpt_collections')
+        .select('af56_id, or_number, amount, date')
+        .range(from, to);
+    });
+
+    const remoteKeys = new Set(
+      (remoteData || []).map((r: any) => `${r.af56_id}_${r.or_number}_${parseFloat(r.amount || 0)}_${r.date}`)
+    );
+
+    const toUpload = localList.filter(l =>
+      !remoteKeys.has(`${l.af56Id}_${l.orNumber}_${Number(l.amount || 0)}_${l.date}`)
+    );
+
+    if (toUpload.length === 0) return 0;
+
+    const rows = toUpload.map(e => ({
+      user_id: isValidUuid(e.userId) ? e.userId : userId,
+      collector_email: e.collectorEmail || userEmail,
+      af56_id: e.af56Id || '',
+      or_number: e.orNumber || '',
+      payor: e.payor || '',
+      barangay: e.barangay || '',
+      land_name: e.landName || '',
+      td_number: e.tdNumber || '',
+      years_paid: e.yearsPaid || '',
+      amount: Number(e.amount) || 0,
+      date: e.date || new Date().toISOString().split('T')[0],
+      remarks: e.remarks || '',
+    }));
+
+    const chunkSize = 500;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      const chunk = rows.slice(i, i + chunkSize);
+      const { error } = await supabase.from('rcd_rpt_collections').insert(chunk);
+      if (error) {
+        console.error('Error syncing local RPT to Supabase:', error);
+        return 0;
+      }
+    }
+
+    console.log(`Successfully synced ${toUpload.length} local RPT collections to Supabase!`);
+    return toUpload.length;
+  } catch (err) {
+    console.error('Failed to sync local RPT collections to Supabase:', err);
+    return 0;
   }
 };
 
@@ -1081,160 +1569,290 @@ export const deleteRPTCollectionGroup = async (ids: number[], af56Id?: string, o
           .from('rcd_rpt_collections')
           .delete()
           .in('id', ids);
-        if (error) throw error;
-        return true;
+        if (error) {
+          console.error('Error deleting RPT collection group from Supabase:', error);
+        }
       } else if (af56Id && orNumber) {
         const { error } = await supabase
           .from('rcd_rpt_collections')
           .delete()
           .eq('af56_id', af56Id)
           .eq('or_number', orNumber);
-        if (error) throw error;
-        return true;
+        if (error) {
+          console.error('Error deleting RPT collection group from Supabase:', error);
+        }
       }
     } catch (e) {
       console.error('Error deleting RPT collection group from Supabase:', e);
     }
   }
 
-  const current = await getRPTCollections();
-  const idSet = new Set(ids || []);
-  const filtered = current.filter(c => {
-    if (idSet.has(c.id)) return false;
-    if (af56Id && orNumber && c.af56Id === af56Id && c.orNumber === orNumber) return false;
-    return true;
-  });
-  localStorage.setItem('rpt_collections', JSON.stringify(filtered));
+  // Always remove deleted items from local storage as well
+  try {
+    const stored = localStorage.getItem('rpt_collections');
+    if (stored) {
+      const current: RPTCollectionItem[] = JSON.parse(stored);
+      const idSet = new Set(ids || []);
+      const filtered = current.filter(c => {
+        if (idSet.has(c.id)) return false;
+        if (af56Id && orNumber && c.af56Id === af56Id && c.orNumber === orNumber) return false;
+        return true;
+      });
+      localStorage.setItem('rpt_collections', JSON.stringify(filtered));
+    }
+  } catch (err) {
+    console.error('Error updating local storage after delete:', err);
+  }
+
   return true;
 };
 
 // ============================================================================
-// 6. USER MANAGEMENT (Table: rcd_profiles & Local Storage)
+// 6. USER MANAGEMENT (Table: public.users & Local Storage)
 // ============================================================================
 
 export interface ManagedUser {
-  id: string;
-  email: string;
+  id: string; // maps to userid
+  firstName: string;
+  lastName: string;
   fullName: string;
+  email: string;
+  password?: string;
+  department?: string;
+  position?: string;
   role: 'admin' | 'user' | string;
   status: 'Active' | 'Inactive';
   createdAt?: string;
+  lastLogin?: string | null;
+  signature?: string | null;
+  signatureUrl?: string | null;
 }
 
 export const getAllManagedUsers = async (): Promise<ManagedUser[]> => {
+  let dbUsers: ManagedUser[] = [];
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('rcd_profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const data = await fetchAllRows(async (from, to) => {
+        return await supabase
+          .from('users')
+          .select('*')
+          .order('datecreated', { ascending: false })
+          .range(from, to);
+      });
 
-      if (!error && data && data.length > 0) {
-        return data.map((u: any) => ({
-          id: u.id,
-          email: u.email,
-          fullName: u.full_name || u.email?.split('@')[0] || 'Unknown User',
+      if (data && data.length > 0) {
+        dbUsers = data.map((u: any) => ({
+          id: u.userid,
+          firstName: u.firstname || '',
+          lastName: u.lastname || '',
+          fullName: `${u.firstname || ''} ${u.lastname || ''}`.trim() || u.email?.split('@')[0] || 'Unknown User',
+          email: u.email || '',
+          password: u.password || '',
+          department: u.department || '',
+          position: u.position || '',
           role: u.role || 'user',
-          status: 'Active',
-          createdAt: u.created_at || new Date().toISOString()
+          status: (u.status === 'Inactive' ? 'Inactive' : 'Active') as 'Active' | 'Inactive',
+          createdAt: u.datecreated || new Date().toISOString(),
+          lastLogin: u.lastlogin || null,
+          signature: u.signature || null,
+          signatureUrl: u.signature_url || null
         }));
       }
     } catch (e) {
-      console.warn('Error loading users from Supabase, checking local storage:', e);
+      console.warn('Error loading users from public.users table, checking local storage:', e);
     }
   }
 
   const stored = localStorage.getItem('rcd_managed_users');
+  let localUsers: ManagedUser[] = [];
   if (stored) {
     try {
-      return JSON.parse(stored);
+      localUsers = JSON.parse(stored);
     } catch {
       // ignore
     }
   }
 
+  if (dbUsers.length > 0) {
+    // Merge any locally created accounts so newly created users are guaranteed to appear immediately
+    const dbEmails = new Set(dbUsers.map(u => u.email?.toLowerCase()));
+    const missingLocal = localUsers.filter(u => u.email && !dbEmails.has(u.email.toLowerCase()));
+    const combined = [...dbUsers, ...missingLocal];
+    localStorage.setItem('rcd_managed_users', JSON.stringify(combined));
+    return combined;
+  }
+
+  if (localUsers.length > 0) {
+    return localUsers;
+  }
+
   const defaultUsers: ManagedUser[] = [
-    { id: 'usr-1', email: 'admin@rcd.gov.ph', fullName: 'System Administrator', role: 'admin', status: 'Active', createdAt: '2026-01-01T08:00:00.000Z' },
-    { id: 'usr-2', email: 'collector@rcd.gov.ph', fullName: 'Menard A. Herrera', role: 'user', status: 'Active', createdAt: '2026-01-05T08:00:00.000Z' },
-    { id: 'usr-3', email: 'maria.santos@rcd.gov.ph', fullName: 'Maria Santos, CPA', role: 'admin', status: 'Active', createdAt: '2026-01-10T08:00:00.000Z' },
-    { id: 'usr-4', email: 'hesther.fanoga@rcd.gov.ph', fullName: 'Hesther F. Fanoga', role: 'user', status: 'Active', createdAt: '2026-01-15T08:00:00.000Z' },
-    { id: 'usr-5', email: 'pedro.reyes@rcd.gov.ph', fullName: 'Pedro Reyes', role: 'admin', status: 'Active', createdAt: '2026-01-20T08:00:00.000Z' }
+    { id: '11111111-1111-1111-1111-111111111111', firstName: 'System', lastName: 'Administrator', fullName: 'System Administrator', email: 'admin@rcd.gov.ph', password: 'admin', department: 'Treasury Office', position: 'Municipal Treasurer', role: 'admin', status: 'Active', createdAt: '2026-01-01T08:00:00.000Z' },
+    { id: '22222222-2222-2222-2222-222222222222', firstName: 'Menard', lastName: 'Herrera', fullName: 'Menard A. Herrera', email: 'collector@rcd.gov.ph', password: 'user', department: 'Treasury Office', position: 'Revenue Collection Clerk II', role: 'user', status: 'Active', createdAt: '2026-01-05T08:00:00.000Z' },
+    { id: '33333333-3333-3333-3333-333333333333', firstName: 'Maria', lastName: 'Santos', fullName: 'Maria Santos, CPA', email: 'maria.santos@rcd.gov.ph', password: 'password', department: 'Accounting Office', position: 'Municipal Accountant', role: 'admin', status: 'Active', createdAt: '2026-01-10T08:00:00.000Z' },
+    { id: '44444444-4444-4444-4444-444444444444', firstName: 'Hesther', lastName: 'Fanoga', fullName: 'Hesther F. Fanoga', email: 'hesther.fanoga@rcd.gov.ph', password: 'password', department: 'Treasury Office', position: 'Revenue Collection Clerk I', role: 'user', status: 'Active', createdAt: '2026-01-15T08:00:00.000Z' },
+    { id: '55555555-5555-5555-5555-555555555555', firstName: 'Pedro', lastName: 'Reyes', fullName: 'Pedro Reyes', email: 'pedro.reyes@rcd.gov.ph', password: 'password', department: 'Executive Office', position: 'Municipal Mayor', role: 'admin', status: 'Active', createdAt: '2026-01-20T08:00:00.000Z' }
   ];
   localStorage.setItem('rcd_managed_users', JSON.stringify(defaultUsers));
   return defaultUsers;
 };
 
-export const createManagedUser = async (user: { email: string; fullName: string; role: string; password?: string; status?: 'Active' | 'Inactive' }): Promise<ManagedUser | null> => {
+export const createManagedUser = async (user: { 
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  email: string; 
+  password: string;
+  department?: string;
+  position?: string;
+  role: string; 
+  status?: 'Active' | 'Inactive';
+}): Promise<ManagedUser | null> => {
   const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'usr_' + Date.now();
-  
+  const initialStatus = user.status || 'Active';
+
+  let fName = user.firstName?.trim() || '';
+  let lName = user.lastName?.trim() || '';
+  if (!fName && user.fullName) {
+    const parts = user.fullName.trim().split(' ');
+    fName = parts[0] || 'User';
+    lName = parts.slice(1).join(' ') || '';
+  }
+  if (!fName) fName = user.email.split('@')[0];
+
+  const full = `${fName} ${lName}`.trim();
+  const cleanEmail = user.email.toLowerCase().trim();
+
   if (isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
-        .from('rcd_profiles')
+        .from('users')
         .insert({
-          id: newId,
-          email: user.email,
-          full_name: user.fullName,
-          role: user.role.toLowerCase()
+          userid: newId,
+          firstname: fName,
+          lastname: lName,
+          password: user.password.trim(),
+          department: user.department?.trim() || null,
+          position: user.position?.trim() || null,
+          role: user.role.toLowerCase(),
+          email: cleanEmail,
+          status: initialStatus,
+          datecreated: new Date().toISOString()
         })
         .select()
         .single();
 
       if (!error && data) {
-        return {
-          id: data.id,
+        const created: ManagedUser = {
+          id: data.userid,
+          firstName: data.firstname,
+          lastName: data.lastname,
+          fullName: `${data.firstname} ${data.lastname}`.trim(),
           email: data.email,
-          fullName: data.full_name,
-          role: data.role,
-          status: user.status || 'Active',
-          createdAt: data.created_at
+          password: data.password,
+          department: data.department || '',
+          position: data.position || '',
+          role: data.role || 'user',
+          status: (data.status as 'Active' | 'Inactive') || initialStatus,
+          createdAt: data.datecreated
         };
+
+        const stored = localStorage.getItem('rcd_managed_users');
+        const list: ManagedUser[] = stored ? JSON.parse(stored) : [];
+        const updated = [created, ...list.filter(u => u.email?.toLowerCase() !== cleanEmail && u.id !== created.id)];
+        localStorage.setItem('rcd_managed_users', JSON.stringify(updated));
+        return created;
+      } else if (error) {
+        console.warn('public.users insert note:', error.message);
       }
     } catch (e) {
-      console.warn('Error creating user in Supabase:', e);
+      console.warn('Error creating user in public.users:', e);
     }
   }
 
   const current = await getAllManagedUsers();
   const newUser: ManagedUser = {
     id: newId,
-    email: user.email,
-    fullName: user.fullName,
+    firstName: fName,
+    lastName: lName,
+    fullName: full,
+    email: cleanEmail,
+    password: user.password.trim(),
+    department: user.department?.trim() || '',
+    position: user.position?.trim() || '',
     role: user.role.toLowerCase(),
-    status: user.status || 'Active',
+    status: initialStatus,
     createdAt: new Date().toISOString()
   };
-  const updated = [newUser, ...current];
+  const updated = [newUser, ...current.filter(u => u.email?.toLowerCase() !== cleanEmail)];
   localStorage.setItem('rcd_managed_users', JSON.stringify(updated));
   return newUser;
 };
 
-export const updateManagedUser = async (id: string, user: { email?: string; fullName: string; role: string; status?: 'Active' | 'Inactive' }): Promise<boolean> => {
+export const updateManagedUser = async (id: string, user: { 
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  email?: string; 
+  password?: string;
+  department?: string;
+  position?: string;
+  role?: string; 
+  status?: 'Active' | 'Inactive';
+}): Promise<boolean> => {
+  let fName = user.firstName?.trim();
+  let lName = user.lastName?.trim();
+  if (fName === undefined && user.fullName) {
+    const parts = user.fullName.trim().split(' ');
+    fName = parts[0];
+    lName = parts.slice(1).join(' ');
+  }
+
   if (isSupabaseConfigured()) {
     try {
-      const { error } = await supabase
-        .from('rcd_profiles')
-        .update({
-          full_name: user.fullName,
-          role: user.role.toLowerCase(),
-          ...(user.email ? { email: user.email } : {})
-        })
-        .eq('id', id);
+      const updatePayload: any = {};
+      if (fName !== undefined) updatePayload.firstname = fName;
+      if (lName !== undefined) updatePayload.lastname = lName;
+      if (user.email) updatePayload.email = user.email.toLowerCase().trim();
+      if (user.password && user.password.trim()) updatePayload.password = user.password.trim();
+      if (user.department !== undefined) updatePayload.department = user.department?.trim() || null;
+      if (user.position !== undefined) updatePayload.position = user.position?.trim() || null;
+      if (user.role) updatePayload.role = user.role.toLowerCase();
+      if (user.status) updatePayload.status = user.status;
 
-      if (!error) return true;
+      const { error } = await supabase
+        .from('users')
+        .update(updatePayload)
+        .eq('userid', id);
+
+      if (error) {
+        console.warn('Error updating public.users in Supabase:', error);
+      }
     } catch (e) {
       console.warn('Error updating user in Supabase:', e);
     }
   }
 
   const current = await getAllManagedUsers();
-  const updated = current.map(u => u.id === id ? {
-    ...u,
-    fullName: user.fullName,
-    role: user.role.toLowerCase(),
-    status: user.status || u.status,
-    ...(user.email ? { email: user.email } : {})
-  } : u);
+  const updated = current.map(u => {
+    if (u.id === id) {
+      const newFirst = fName !== undefined ? fName : u.firstName;
+      const newLast = lName !== undefined ? lName : u.lastName;
+      return {
+        ...u,
+        firstName: newFirst,
+        lastName: newLast,
+        fullName: `${newFirst} ${newLast}`.trim(),
+        role: user.role ? user.role.toLowerCase() : u.role,
+        status: user.status || u.status,
+        department: user.department !== undefined ? user.department : u.department,
+        position: user.position !== undefined ? user.position : u.position,
+        ...(user.email ? { email: user.email.toLowerCase().trim() } : {}),
+        ...(user.password && user.password.trim() ? { password: user.password.trim() } : {})
+      };
+    }
+    return u;
+  });
   localStorage.setItem('rcd_managed_users', JSON.stringify(updated));
   return true;
 };
@@ -1243,19 +1861,26 @@ export const deleteManagedUser = async (id: string): Promise<boolean> => {
   if (isSupabaseConfigured()) {
     try {
       const { error } = await supabase
-        .from('rcd_profiles')
+        .from('users')
         .delete()
-        .eq('id', id);
+        .eq('userid', id);
 
-      if (!error) return true;
+      if (error) {
+        console.warn('Error deleting user from public.users:', error);
+      }
     } catch (e) {
       console.warn('Error deleting user from Supabase:', e);
     }
   }
 
-  const current = await getAllManagedUsers();
-  const updated = current.filter(u => u.id !== id);
-  localStorage.setItem('rcd_managed_users', JSON.stringify(updated));
+  const stored = localStorage.getItem('rcd_managed_users');
+  if (stored) {
+    try {
+      const current: ManagedUser[] = JSON.parse(stored);
+      const updated = current.filter(u => u.id !== id);
+      localStorage.setItem('rcd_managed_users', JSON.stringify(updated));
+    } catch {}
+  }
   return true;
 };
 
@@ -1263,23 +1888,21 @@ export const getUserProfile = async (userId: string): Promise<UserProfile | null
   if (isSupabaseConfigured()) {
     try {
       const { data, error } = await supabase
-        .from('rcd_profiles')
+        .from('users')
         .select('*')
-        .eq('id', userId)
+        .eq('userid', userId)
         .single();
 
-      if (error) throw error;
-
-      if (data) {
+      if (!error && data) {
         return {
-          id: data.id,
-          email: data.email,
-          name: data.full_name || '',
-          role: data.role || 'Collector',
+          id: data.userid,
+          email: data.email || '',
+          name: `${data.firstname || ''} ${data.lastname || ''}`.trim() || data.email,
+          role: data.role || 'user',
         };
       }
     } catch (e) {
-      console.warn('Error fetching profile from Supabase:', e);
+      console.warn('Error fetching profile from public.users:', e);
     }
   }
 
@@ -1293,3 +1916,49 @@ export const getUserProfile = async (userId: string): Promise<UserProfile | null
   }
   return null;
 };
+
+// ============================================================================
+// 10. LGU DEPARTMENTS SERVICE
+// ============================================================================
+
+export interface LguDepartment {
+  id: string;
+  departmentCode: string;
+  departmentName: string;
+  departmentAcronym?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export const getLguDepartments = async (): Promise<LguDepartment[]> => {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('lgu_departments')
+        .select('*')
+        .order('department_name', { ascending: true });
+
+      if (!error && data) {
+        return data.map((d: any) => ({
+          id: d.id,
+          departmentCode: d.department_code,
+          departmentName: d.department_name,
+          departmentAcronym: d.department_acronym,
+          description: d.description,
+          isActive: d.is_active,
+        }));
+      }
+    } catch (e) {
+      console.warn('Error fetching lgu_departments:', e);
+    }
+  }
+
+  // Fallback defaults
+  return [
+    { id: '1', departmentCode: 'TREASURER', departmentName: 'Municipal Treasurer Office', departmentAcronym: 'MTO', isActive: true },
+    { id: '2', departmentCode: 'ACCOUNTING', departmentName: 'Municipal Accounting Office', departmentAcronym: 'MAO', isActive: true },
+    { id: '3', departmentCode: 'BUDGET', departmentName: 'Municipal Budget Office', departmentAcronym: 'MBO', isActive: true },
+    { id: '4', departmentCode: 'MAYOR', departmentName: 'Office of the Mayor', departmentAcronym: 'OMO', isActive: true },
+  ];
+};
+

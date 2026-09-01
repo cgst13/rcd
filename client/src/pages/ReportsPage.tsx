@@ -17,12 +17,33 @@ import {
   Autocomplete,
   TextField,
   Grid,
-  TablePagination
+  TablePagination,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Chip,
+  Divider
 } from '@mui/material';
 import { Download, Clear, Print } from '@mui/icons-material';
-import { getRecentReports, getCollectionEntries, getSignatories, getRPTCollections, type CollectionItem } from '../services/supabaseService';
+import * as XLSX from 'xlsx';
+import { 
+  getRecentReports, 
+  getCollectionEntries, 
+  getSignatories, 
+  getRPTCollections, 
+  getAllManagedUsers,
+  type CollectionItem, 
+  type ManagedUser 
+} from '../services/supabaseService';
 import type { RCDReport, Signatory, RPTCollectionItem } from '../types/rcd';
 import { useAuth } from '../context/useAuth';
+import { Notification } from '../components/Notification';
 
 export const ReportsPage: React.FC = () => {
   const { user } = useAuth();
@@ -34,6 +55,17 @@ export const ReportsPage: React.FC = () => {
   const [signatories, setSignatories] = useState<Signatory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [tabValue, setTabValue] = useState(0);
+
+  // Notification State
+  const [notification, setNotification] = useState<{
+    open: boolean;
+    message: string;
+    severity: 'success' | 'error' | 'info' | 'warning';
+  }>({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
   // Pagination
   const [page, setPage] = useState(0);
@@ -62,14 +94,25 @@ export const ReportsPage: React.FC = () => {
   const [startOr2, setStartOr2] = useState<string | null>(null);
   const [endOr2, setEndOr2] = useState<string | null>(null);
 
+  // Managed Users for Certification Signatory Selection
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+
+  // Print Certification Modal State
+  const [printDialogOpen, setPrintDialogOpen] = useState<boolean>(false);
+  const [printTarget, setPrintTarget] = useState<'COLLECTIONS' | 'RPT_GENERAL' | 'RPT_SEF' | null>(null);
+  const [selectedUserDropdownId, setSelectedUserDropdownId] = useState<string>('current');
+  const [certAccountableName, setCertAccountableName] = useState<string>('');
+  const [certPosition, setCertPosition] = useState<string>('');
+
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [reportsData, collectionsData, signatoriesData, rptData] = await Promise.all([
+        const [reportsData, collectionsData, signatoriesData, rptData, usersData] = await Promise.all([
           getRecentReports(),
           getCollectionEntries(),
           getSignatories(),
-          getRPTCollections()
+          getRPTCollections(),
+          getAllManagedUsers()
         ]);
         setReports(reportsData);
         setCollections(collectionsData);
@@ -77,6 +120,7 @@ export const ReportsPage: React.FC = () => {
         setSignatories(signatoriesData);
         setRptCollections(rptData);
         setFilteredRptCollections(rptData);
+        setManagedUsers(usersData);
       } catch (error) {
         console.error('Failed to fetch data', error);
       } finally {
@@ -444,7 +488,7 @@ export const ReportsPage: React.FC = () => {
       printWindow.document.write(`
         <html>
           <head>
-            <title>Print Cover - AF No. ${afNo}</title>
+            <title>Print Cover - A.F. NO. 51</title>
             <style>
               @page { size: Letter portrait; margin: 0.5in; }
               body { font-family: Arial, sans-serif; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
@@ -483,7 +527,68 @@ export const ReportsPage: React.FC = () => {
     }
   };
 
-  const handlePrintReport = () => {
+  const handleInitiatePrint = (target: 'COLLECTIONS' | 'RPT_GENERAL' | 'RPT_SEF') => {
+    if (target === 'COLLECTIONS' && filteredCollections.length === 0) {
+      setNotification({
+        open: true,
+        message: 'No collection records found to print.',
+        severity: 'warning'
+      });
+      return;
+    }
+    if ((target === 'RPT_GENERAL' || target === 'RPT_SEF') && (!rptStartOr1 || !rptEndOr1)) {
+      setNotification({
+        open: true,
+        message: 'Please specify the RPT OR Number Range 1 before printing.',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    setPrintTarget(target);
+
+    // Default to logged-in user's full name and position
+    const defaultName = (user?.name || 'ACCOUNTABLE OFFICER').toUpperCase();
+    const defaultPosition = user?.position || 'Revenue Collection Clerk I';
+
+    setCertAccountableName(defaultName);
+    setCertPosition(defaultPosition);
+    setSelectedUserDropdownId(user?.id ? String(user.id) : 'current');
+    setPrintDialogOpen(true);
+  };
+
+  const handleUserDropdownChange = (userId: string) => {
+    setSelectedUserDropdownId(userId);
+    if (userId === 'current') {
+      const defaultName = (user?.name || 'ACCOUNTABLE OFFICER').toUpperCase();
+      const defaultPosition = user?.position || 'Revenue Collection Clerk I';
+      setCertAccountableName(defaultName);
+      setCertPosition(defaultPosition);
+    } else {
+      const selected = managedUsers.find(u => String(u.id) === String(userId));
+      if (selected) {
+        setCertAccountableName(selected.fullName.trim().toUpperCase());
+        setCertPosition(selected.position?.trim() || 'Revenue Collection Clerk I');
+      }
+    }
+  };
+
+  const handleProceedPrint = () => {
+    const finalName = certAccountableName.trim().toUpperCase() || (user?.name ? user.name.toUpperCase() : 'ACCOUNTABLE OFFICER');
+    const finalPos = certPosition.trim() || user?.position || 'Revenue Collection Clerk I';
+
+    setPrintDialogOpen(false);
+
+    if (printTarget === 'COLLECTIONS') {
+      handlePrintReport(finalName, finalPos);
+    } else if (printTarget === 'RPT_GENERAL') {
+      handlePrintRptReport('GENERAL', finalName, finalPos);
+    } else if (printTarget === 'RPT_SEF') {
+      handlePrintRptReport('SEF', finalName, finalPos);
+    }
+  };
+
+  const handlePrintReport = (accountableOfficerName?: string, accountableOfficerPosition?: string) => {
     // 1. Prepare Data
     const reportData = filteredCollections;
     const totalAmount = reportData.reduce((sum, item) => sum + (item.amount || 0), 0);
@@ -546,7 +651,7 @@ export const ReportsPage: React.FC = () => {
         const minN = parseInt(startOr1, 10);
         const maxN = parseInt(endOr1, 10);
         afRanges.push({
-          name: selectedAfNos[0] ? (selectedAfNos[0].toLowerCase().startsWith('a.f.') ? selectedAfNos[0] : `A.F. NO. ${selectedAfNos[0]}`) : 'A.F. NO. 51',
+          name: 'A.F. NO. 51',
           minOr: startOr1,
           maxOr: endOr1,
           amount: r1.total,
@@ -561,7 +666,7 @@ export const ReportsPage: React.FC = () => {
         const minN = parseInt(startOr2, 10);
         const maxN = parseInt(endOr2, 10);
         afRanges.push({
-          name: selectedAfNos[0] ? (selectedAfNos[0].toLowerCase().startsWith('a.f.') ? selectedAfNos[0] : `A.F. NO. ${selectedAfNos[0]}`) : 'A.F. NO. 51',
+          name: 'A.F. NO. 51',
           minOr: startOr2,
           maxOr: endOr2,
           amount: r2.total,
@@ -572,74 +677,73 @@ export const ReportsPage: React.FC = () => {
       }
     } else {
       // Automatically detect contiguous ranges from reportData
-      Object.entries(itemsByAf).forEach(([af, itms]) => {
-        const formName = af.toLowerCase().startsWith('a.f.') ? af.toUpperCase() : `A.F. NO. ${af}`;
-        const sorted = [...itms].sort((a, b) => {
+      const sorted = [...reportData]
+        .filter(it => it.orNo)
+        .sort((a, b) => {
           const nA = parseInt(a.orNo || '', 10);
           const nB = parseInt(b.orNo || '', 10);
           if (!isNaN(nA) && !isNaN(nB)) return nA - nB;
           return (a.orNo || '').localeCompare(b.orNo || '');
         });
 
-        let curMinOr = '';
-        let curMaxOr = '';
-        let curAmount = 0;
-        let curQty = 0;
-        let curMinN = -1;
-        let curLastN = -1;
-        let hasActive = false;
+      let curMinOr = '';
+      let curMaxOr = '';
+      let curAmount = 0;
+      let curQty = 0;
+      let curMinN = -1;
+      let curLastN = -1;
+      let hasActive = false;
 
-        for (const it of sorted) {
-          const orVal = it.orNo || '';
-          const orN = parseInt(orVal, 10);
-          const amt = it.amount || 0;
+      for (const it of sorted) {
+        const orVal = it.orNo || '';
+        const orN = parseInt(orVal, 10);
+        const amt = it.amount || 0;
 
-          if (!hasActive) {
+        if (!hasActive) {
+          curMinOr = orVal;
+          curMaxOr = orVal;
+          curAmount = amt;
+          curQty = 1;
+          curMinN = isNaN(orN) ? -1 : orN;
+          curLastN = isNaN(orN) ? -1 : orN;
+          hasActive = true;
+        } else {
+          if (!isNaN(orN) && curLastN !== -1 && orN === curLastN + 1) {
+            curMaxOr = orVal;
+            curAmount += amt;
+            curQty += 1;
+            curLastN = orN;
+          } else {
+            afRanges.push({
+              name: 'A.F. NO. 51',
+              minOr: curMinOr,
+              maxOr: curMaxOr,
+              amount: curAmount,
+              qty: curQty,
+              minNum: curMinN,
+              maxNum: curLastN
+            });
             curMinOr = orVal;
             curMaxOr = orVal;
             curAmount = amt;
             curQty = 1;
             curMinN = isNaN(orN) ? -1 : orN;
             curLastN = isNaN(orN) ? -1 : orN;
-            hasActive = true;
-          } else {
-            if (!isNaN(orN) && curLastN !== -1 && orN === curLastN + 1) {
-              curMaxOr = orVal;
-              curAmount += amt;
-              curQty += 1;
-              curLastN = orN;
-            } else {
-              afRanges.push({
-                name: formName,
-                minOr: curMinOr,
-                maxOr: curMaxOr,
-                amount: curAmount,
-                qty: curQty,
-                minNum: curMinN,
-                maxNum: curLastN
-              });
-              curMinOr = orVal;
-              curMaxOr = orVal;
-              curAmount = amt;
-              curQty = 1;
-              curMinN = isNaN(orN) ? -1 : orN;
-              curLastN = isNaN(orN) ? -1 : orN;
-            }
           }
         }
+      }
 
-        if (hasActive) {
-          afRanges.push({
-            name: formName,
-            minOr: curMinOr,
-            maxOr: curMaxOr,
-            amount: curAmount,
-            qty: curQty,
-            minNum: curMinN,
-            maxNum: curLastN
-          });
-        }
-      });
+      if (hasActive) {
+        afRanges.push({
+          name: 'A.F. NO. 51',
+          minOr: curMinOr,
+          maxOr: curMaxOr,
+          amount: curAmount,
+          qty: curQty,
+          minNum: curMinN,
+          maxNum: curLastN
+        });
+      }
     }
 
     // 3. Booklet Math (50 OR Numbers per Booklet) for Section C
@@ -663,7 +767,7 @@ export const ReportsPage: React.FC = () => {
     let prevEndState: { formName: string; toNum: number; nextStartNum: number; padLen: number } | null = null;
 
     afRanges.forEach((range) => {
-      const formName = range.name || 'A.F. NO. 51';
+      const formName = 'A.F. NO. 51';
       const padLen = range.minOr.length || 5;
       const fmt = (n: number) => n.toString().padStart(padLen, '0');
 
@@ -813,19 +917,9 @@ export const ReportsPage: React.FC = () => {
 
     // Dynamic Signatories (Exact 4 Official Roles)
     // 1. CERTIFICATION: Collector / Accountable Officer
-    const collectorCandidate = signatories.find(s => 
-      s.remarks?.toLowerCase().includes('certification') || 
-      s.position?.toLowerCase().includes('clerk') ||
-      s.position?.toLowerCase().includes('collector') ||
-      s.position?.toLowerCase().includes('rcc') ||
-      (s.department?.toLowerCase().includes('treasurer') && !s.position?.toLowerCase().includes('municipal treasurer'))
-    ) || signatories[0];
-
     const collector = {
-      fullName: (collectorCandidate?.fullName && collectorCandidate.fullName !== 'ACCOUNTABLE OFFICER' 
-        ? collectorCandidate.fullName 
-        : (user?.name ? user.name.toUpperCase() : 'ACCOUNTABLE OFFICER')),
-      position: collectorCandidate?.position || 'Revenue Collection Clerk I'
+      fullName: (accountableOfficerName || user?.name || 'ACCOUNTABLE OFFICER').trim().toUpperCase(),
+      position: (accountableOfficerPosition || user?.position || 'Revenue Collection Clerk I').trim()
     };
 
     // 2. VERIFICATION AND ACKNOWLEDGMENT: Municipal Treasurer
@@ -855,7 +949,7 @@ export const ReportsPage: React.FC = () => {
         <html lang="en"> 
         <head> 
         <meta charset="UTF-8"> 
-        <title>Report of Collections and Deposits</title> 
+        <title>Report of Collections and Deposits - A.F. NO. 51</title> 
         <style> 
           @page { 
             size: 8.5in 13in; 
@@ -1096,7 +1190,7 @@ export const ReportsPage: React.FC = () => {
               <tbody>
                 ${afRanges.map(item => `
                   <tr>
-                    <td>${item.name}</td>
+                    <td>A.F. NO. 51</td>
                     <td class="text-center">${item.minOr}</td>
                     <td class="text-center">${item.maxOr}</td>
                     <td class="text-right">${item.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
@@ -1438,7 +1532,7 @@ export const ReportsPage: React.FC = () => {
       printWindow.document.write(`
         <html>
           <head>
-            <title>Print RPT Cover - AF No. ${afNo}</title>
+            <title>Print RPT Cover - A.F. NO. 56</title>
             <style>
               @page { size: Letter portrait; margin: 0.5in; }
               body { font-family: Arial, sans-serif; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
@@ -1512,7 +1606,7 @@ export const ReportsPage: React.FC = () => {
     }
   };
 
-  const handlePrintRptReport = (fundType: 'GENERAL' | 'SEF' = 'GENERAL') => {
+  const handlePrintRptReport = (fundType: 'GENERAL' | 'SEF' = 'GENERAL', accountableOfficerName?: string, accountableOfficerPosition?: string) => {
     if (!rptFilterAf56Id) return;
     const afNo = rptFilterAf56Id;
 
@@ -1645,19 +1739,9 @@ export const ReportsPage: React.FC = () => {
 
     // Dynamic Signatories (Exact 4 Official Roles)
     // 1. CERTIFICATION: Collector / Accountable Officer
-    const collectorCandidate = signatories.find(s => 
-      s.remarks?.toLowerCase().includes('certification') || 
-      s.position?.toLowerCase().includes('clerk') ||
-      s.position?.toLowerCase().includes('collector') ||
-      s.position?.toLowerCase().includes('rcc') ||
-      (s.department?.toLowerCase().includes('treasurer') && !s.position?.toLowerCase().includes('municipal treasurer'))
-    ) || signatories[0];
-
     const collector = {
-      fullName: (collectorCandidate?.fullName && collectorCandidate.fullName !== 'ACCOUNTABLE OFFICER' 
-        ? collectorCandidate.fullName 
-        : (user?.name ? user.name.toUpperCase() : 'ACCOUNTABLE OFFICER')),
-      position: collectorCandidate?.position || 'Revenue Collection Clerk I'
+      fullName: (accountableOfficerName || user?.name || 'ACCOUNTABLE OFFICER').trim().toUpperCase(),
+      position: (accountableOfficerPosition || user?.position || 'Revenue Collection Clerk I').trim()
     };
 
     // 2. VERIFICATION AND ACKNOWLEDGMENT: Municipal Treasurer
@@ -1824,7 +1908,7 @@ export const ReportsPage: React.FC = () => {
         <html lang="en"> 
         <head> 
         <meta charset="UTF-8"> 
-        <title>${reportTitle} - AF No. 56</title> 
+        <title>${reportTitle} - A.F. NO. 56</title> 
         <style> 
           @page { 
             size: 8.5in 13in; 
@@ -2360,8 +2444,148 @@ export const ReportsPage: React.FC = () => {
     }
   };
 
+  const handleExportToExcel = () => {
+    try {
+      const wb = XLSX.utils.book_new();
+
+      // 1. Collections Details Sheet (filtered or all)
+      const dataToExport = filteredCollections.length > 0 ? filteredCollections : collections;
+      if (dataToExport.length > 0) {
+        const collectionsSheetData = dataToExport.map((item, idx) => ({
+          '#': idx + 1,
+          'Date': item.date || '',
+          'AF No.': item.afNo || '',
+          'OR No.': item.orNo || '',
+          'Payor / Taxpayer': item.payor || '',
+          'Particulars / Sub-Category': item.subCategory || '',
+          'Main Category': item.mainCategory || '',
+          'Account Code': item.accountCode || '',
+          'Amount (PHP)': item.amount ?? 0,
+          'Remarks': item.remarks || ''
+        }));
+
+        const wsCollections = XLSX.utils.json_to_sheet(collectionsSheetData);
+        wsCollections['!cols'] = [
+          { wch: 6 },
+          { wch: 13 },
+          { wch: 10 },
+          { wch: 15 },
+          { wch: 30 },
+          { wch: 32 },
+          { wch: 28 },
+          { wch: 16 },
+          { wch: 16 },
+          { wch: 25 }
+        ];
+        XLSX.utils.book_append_sheet(wb, wsCollections, 'Collections Details');
+      }
+
+      // 2. Summary by AF No.
+      if (afNoSummary.length > 0) {
+        const afSummaryRows = afNoSummary.map(item => ({
+          'Accountable Form (AF)': item.afNo,
+          'Total Amount (PHP)': item.amount
+        }));
+        const wsAf = XLSX.utils.json_to_sheet(afSummaryRows);
+        wsAf['!cols'] = [{ wch: 25 }, { wch: 20 }];
+        XLSX.utils.book_append_sheet(wb, wsAf, 'AF Summary');
+      }
+
+      // 3. Summary by Main Category
+      if (mainCategorySummary.length > 0) {
+        const mainCatRows = mainCategorySummary.map(item => ({
+          'Main Category': item.mainCategory,
+          'Total Amount (PHP)': item.amount
+        }));
+        const wsMain = XLSX.utils.json_to_sheet(mainCatRows);
+        wsMain['!cols'] = [{ wch: 35 }, { wch: 20 }];
+        XLSX.utils.book_append_sheet(wb, wsMain, 'Main Category Summary');
+      }
+
+      // 4. Summary by Sub Category
+      if (subCategorySummary.length > 0) {
+        const subCatRows = subCategorySummary.map(item => ({
+          'Sub-Category / Account': item.subCategory,
+          'Total Amount (PHP)': item.amount
+        }));
+        const wsSub = XLSX.utils.json_to_sheet(subCatRows);
+        wsSub['!cols'] = [{ wch: 40 }, { wch: 20 }];
+        XLSX.utils.book_append_sheet(wb, wsSub, 'Sub-Category Summary');
+      }
+
+      // 5. Monthly Summary
+      if (monthlySummary.length > 0) {
+        const monthRows = monthlySummary.map(item => ({
+          'Month / Year': item.monthYear,
+          'Total Amount (PHP)': item.amount
+        }));
+        const wsMonth = XLSX.utils.json_to_sheet(monthRows);
+        wsMonth['!cols'] = [{ wch: 25 }, { wch: 20 }];
+        XLSX.utils.book_append_sheet(wb, wsMonth, 'Monthly Summary');
+      }
+
+      // 6. RPT Collections Sheet
+      const rptDataToExport = filteredRptCollections.length > 0 ? filteredRptCollections : rptCollections;
+      if (rptDataToExport.length > 0) {
+        const rptSheetData = rptDataToExport.map((item, idx) => ({
+          '#': idx + 1,
+          'Date': item.date || '',
+          'AF56 ID': item.af56Id || '',
+          'OR Number': item.orNumber || '',
+          'Payor / Declared Owner': item.payor || '',
+          'Barangay': item.barangay || '',
+          'Land / Property Name': item.landName || '',
+          'Tax Declaration (TD) No.': item.tdNumber || '',
+          'Period Covered / Years Paid': item.yearsPaid || '',
+          'Amount (PHP)': item.amount ?? 0,
+          'Remarks': item.remarks || ''
+        }));
+
+        const wsRpt = XLSX.utils.json_to_sheet(rptSheetData);
+        wsRpt['!cols'] = [
+          { wch: 6 },
+          { wch: 13 },
+          { wch: 15 },
+          { wch: 15 },
+          { wch: 30 },
+          { wch: 22 },
+          { wch: 26 },
+          { wch: 22 },
+          { wch: 25 },
+          { wch: 16 },
+          { wch: 25 }
+        ];
+        XLSX.utils.book_append_sheet(wb, wsRpt, 'RPT Collections (AF56)');
+      }
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `RCD_Reports_Summary_${timestamp}.xlsx`;
+      XLSX.writeFile(wb, filename);
+
+      setNotification({
+        open: true,
+        message: `Successfully exported reports data to ${filename}`,
+        severity: 'success'
+      });
+    } catch (err: any) {
+      console.error('Error exporting data to Excel:', err);
+      setNotification({
+        open: true,
+        message: 'Failed to export reports to Excel. Please try again.',
+        severity: 'error'
+      });
+    }
+  };
+
   return (
     <Box>
+      <Notification
+        open={notification.open}
+        message={notification.message}
+        severity={notification.severity}
+        onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+      />
+
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3.5, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h4" component="h1" fontWeight="800" sx={{ color: '#0f172a' }}>
@@ -2432,107 +2656,136 @@ export const ReportsPage: React.FC = () => {
               <Tooltip title="Print Official RCD Report" arrow>
                 <IconButton 
                   color="primary" 
-                  onClick={handlePrintReport}
+                  onClick={() => handleInitiatePrint('COLLECTIONS')}
                   sx={{ 
                     bgcolor: '#0284c7', 
                     color: '#ffffff', 
-                    borderRadius: 1,
-                    '&:hover': { bgcolor: '#0369a1', color: '#ffffff' }
+                    borderRadius: 1, 
+                    '&:hover': { bgcolor: '#0369a1', color: '#ffffff' } 
                   }}
                 >
                   <Print />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Export All Data" arrow>
-                <IconButton color="secondary" sx={{ bgcolor: '#f0f9ff', borderRadius: 1, border: '1px solid rgba(14, 165, 233, 0.2)' }}>
+              <Tooltip title="Export All Data to Excel" arrow>
+                <IconButton 
+                  color="secondary" 
+                  onClick={handleExportToExcel}
+                  sx={{ 
+                    bgcolor: '#f0f9ff', 
+                    color: '#0284c7',
+                    borderRadius: 1, 
+                    border: '1px solid rgba(14, 165, 233, 0.2)',
+                    '&:hover': { bgcolor: '#e0f2fe' }
+                  }}
+                >
                   <Download />
                 </IconButton>
               </Tooltip>
             </>
           )}
 
-          {tabValue === 2 && rptFilterAf56Id && (
+          {tabValue === 2 && (
             <>
-              <Box sx={{ minWidth: 165, width: 175 }}>
-                <Autocomplete
-                  size="small"
-                  options={validRptOrs}
-                  value={rptStartOr1}
-                  onChange={(_, newValue) => setRptStartOr1(newValue)}
-                  renderInput={(params) => <TextField {...params} label="Start OR 1" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
-                />
-              </Box>
-              <Box sx={{ minWidth: 165, width: 175 }}>
-                <Autocomplete
-                  size="small"
-                  options={validRptOrs}
-                  value={rptEndOr1}
-                  onChange={(_, newValue) => setRptEndOr1(newValue)}
-                  renderInput={(params) => <TextField {...params} label="End OR 1" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
-                />
-              </Box>
-              <Box sx={{ minWidth: 165, width: 175 }}>
-                <Autocomplete
-                  size="small"
-                  options={validRptOrs}
-                  value={rptStartOr2}
-                  onChange={(_, newValue) => setRptStartOr2(newValue)}
-                  renderInput={(params) => <TextField {...params} label="Start OR 2" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
-                />
-              </Box>
-              <Box sx={{ minWidth: 165, width: 175 }}>
-                <Autocomplete
-                  size="small"
-                  options={validRptOrs}
-                  value={rptEndOr2}
-                  onChange={(_, newValue) => setRptEndOr2(newValue)}
-                  renderInput={(params) => <TextField {...params} label="End OR 2" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
-                />
-              </Box>
-              <Tooltip title="Print RPT Cover" arrow>
-                <IconButton
-                  color="primary"
-                  onClick={handlePrintRptCover}
-                  disabled={!rptStartOr1 || !rptEndOr1}
-                  sx={{ 
-                    bgcolor: '#0284c7', 
-                    color: '#ffffff', 
-                    borderRadius: 1,
-                    '&:hover': { bgcolor: '#0369a1', color: '#ffffff' }
-                  }}
-                >
-                  <Print />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Print General Fund RPT Report" arrow>
-                <IconButton
-                  color="primary"
-                  onClick={() => handlePrintRptReport('GENERAL')}
-                  disabled={!rptStartOr1 || !rptEndOr1}
-                  sx={{ 
-                    bgcolor: '#0369a1', 
-                    color: '#ffffff', 
-                    borderRadius: 1,
-                    '&:hover': { bgcolor: '#075985', color: '#ffffff' }
-                  }}
-                >
-                  <Print />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Print Special Education Fund (SEF) RPT Report" arrow>
-                <IconButton
-                  color="secondary"
-                  onClick={() => handlePrintRptReport('SEF')}
-                  disabled={!rptStartOr1 || !rptEndOr1}
+              {rptFilterAf56Id && (
+                <>
+                  <Box sx={{ minWidth: 165, width: 175 }}>
+                    <Autocomplete
+                      size="small"
+                      options={validRptOrs}
+                      value={rptStartOr1}
+                      onChange={(_, newValue) => setRptStartOr1(newValue)}
+                      renderInput={(params) => <TextField {...params} label="Start OR 1" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
+                    />
+                  </Box>
+                  <Box sx={{ minWidth: 165, width: 175 }}>
+                    <Autocomplete
+                      size="small"
+                      options={validRptOrs}
+                      value={rptEndOr1}
+                      onChange={(_, newValue) => setRptEndOr1(newValue)}
+                      renderInput={(params) => <TextField {...params} label="End OR 1" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
+                    />
+                  </Box>
+                  <Box sx={{ minWidth: 165, width: 175 }}>
+                    <Autocomplete
+                      size="small"
+                      options={validRptOrs}
+                      value={rptStartOr2}
+                      onChange={(_, newValue) => setRptStartOr2(newValue)}
+                      renderInput={(params) => <TextField {...params} label="Start OR 2" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
+                    />
+                  </Box>
+                  <Box sx={{ minWidth: 165, width: 175 }}>
+                    <Autocomplete
+                      size="small"
+                      options={validRptOrs}
+                      value={rptEndOr2}
+                      onChange={(_, newValue) => setRptEndOr2(newValue)}
+                      renderInput={(params) => <TextField {...params} label="End OR 2" sx={{ '& .MuiInputBase-input': { fontSize: '0.86rem', fontWeight: 600 } }} />}
+                    />
+                  </Box>
+                  <Tooltip title="Print RPT Cover" arrow>
+                    <IconButton
+                      color="primary"
+                      onClick={handlePrintRptCover}
+                      disabled={!rptStartOr1 || !rptEndOr1}
+                      sx={{ 
+                        bgcolor: '#0284c7', 
+                        color: '#ffffff', 
+                        borderRadius: 1,
+                        '&:hover': { bgcolor: '#0369a1', color: '#ffffff' }
+                      }}
+                    >
+                      <Print />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Print General Fund RPT Report" arrow>
+                    <IconButton
+                      color="primary"
+                      onClick={() => handleInitiatePrint('RPT_GENERAL')}
+                      disabled={!rptStartOr1 || !rptEndOr1}
+                      sx={{ 
+                        bgcolor: '#0369a1', 
+                        color: '#ffffff', 
+                        borderRadius: 1, 
+                        '&:hover': { bgcolor: '#075985', color: '#ffffff' } 
+                      }}
+                    >
+                      <Print />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="Print Special Education Fund (SEF) RPT Report" arrow>
+                    <IconButton
+                      color="secondary"
+                      onClick={() => handleInitiatePrint('RPT_SEF')}
+                      disabled={!rptStartOr1 || !rptEndOr1}
+                      sx={{ 
+                        bgcolor: '#f0f9ff', 
+                        color: '#0369a1',
+                        borderRadius: 1,
+                        border: '1px solid rgba(14, 165, 233, 0.4)',
+                        '&:hover': { bgcolor: '#e0f2fe' }
+                      }}
+                    >
+                      <Print />
+                    </IconButton>
+                  </Tooltip>
+                </>
+              )}
+              <Tooltip title="Export RPT & All Data to Excel" arrow>
+                <IconButton 
+                  color="secondary" 
+                  onClick={handleExportToExcel}
                   sx={{ 
                     bgcolor: '#f0f9ff', 
-                    color: '#0369a1',
-                    borderRadius: 1,
-                    border: '1px solid rgba(14, 165, 233, 0.4)',
+                    color: '#0284c7',
+                    borderRadius: 1, 
+                    border: '1px solid rgba(14, 165, 233, 0.2)',
                     '&:hover': { bgcolor: '#e0f2fe' }
                   }}
                 >
-                  <Print />
+                  <Download />
                 </IconButton>
               </Tooltip>
             </>
@@ -2946,6 +3199,126 @@ export const ReportsPage: React.FC = () => {
           </>
         )}
       </Paper>
+
+      {/* Print Certification Signatory Modal */}
+      <Dialog 
+        open={printDialogOpen} 
+        onClose={() => setPrintDialogOpen(false)} 
+        maxWidth="sm" 
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 2, border: '1px solid #e2e8f0' } }}
+      >
+        <DialogTitle sx={{ bgcolor: '#f8fafc', color: '#0369a1', p: 2, borderBottom: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Print sx={{ color: '#0284c7' }} />
+            <Typography variant="h6" fontWeight="800">
+              Report Certification Signatory
+            </Typography>
+          </Box>
+          <Chip 
+            label={
+              printTarget === 'COLLECTIONS' 
+                ? 'Collections (A.F. NO. 51)' 
+                : printTarget === 'RPT_GENERAL' 
+                ? 'RPT General Fund (A.F. NO. 56)' 
+                : 'RPT SEF Fund (A.F. NO. 56)'
+            }
+            size="small"
+            color="primary"
+            sx={{ fontWeight: 700 }}
+          />
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3, pt: 3 }}>
+          <Paper elevation={0} sx={{ p: 2, mb: 3, bgcolor: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 1.5 }}>
+            <Typography variant="caption" sx={{ color: '#0369a1', fontWeight: 600, display: 'block', mb: 0.5 }}>
+              Section D: Certification
+            </Typography>
+            <Typography variant="body2" sx={{ color: '#0c4a6e', fontSize: '0.84rem' }}>
+              Select an accountable officer from registered users or customize the name and position below. This will appear as the certifying signatory in <strong>Section D</strong> on the official RCD.
+            </Typography>
+          </Paper>
+
+          <Grid container spacing={2.5}>
+            <Grid size={{ xs: 12 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel id="select-user-label">Select from Users</InputLabel>
+                <Select
+                  labelId="select-user-label"
+                  label="Select from Users"
+                  value={selectedUserDropdownId}
+                  onChange={(e) => handleUserDropdownChange(e.target.value as string)}
+                >
+                  <MenuItem value="current">
+                    <em>⭐ Current Logged-in User ({user?.name || user?.email})</em>
+                  </MenuItem>
+                  {managedUsers.length > 0 && <Divider sx={{ my: 0.5 }} />}
+                  {managedUsers.map((u) => (
+                    <MenuItem key={u.id} value={String(u.id)}>
+                      {u.fullName} — {u.position || 'Collector'} ({u.department || 'Treasury'})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                label="Accountable Officer Name"
+                fullWidth
+                size="small"
+                value={certAccountableName}
+                onChange={(e) => setCertAccountableName(e.target.value)}
+                placeholder="e.g. CHRISTIAN S. TOLENTINO"
+                required
+                helperText="Printed on Section D Certification line"
+              />
+            </Grid>
+
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                label="Position / Designation"
+                fullWidth
+                size="small"
+                value={certPosition}
+                onChange={(e) => setCertPosition(e.target.value)}
+                placeholder="e.g. Revenue Collection Clerk I"
+                required
+                helperText="Printed underneath the certification signature line"
+              />
+            </Grid>
+          </Grid>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0', gap: 1 }}>
+          <Button 
+            onClick={() => setPrintDialogOpen(false)}
+            sx={{ color: '#64748b' }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Print />}
+            onClick={handleProceedPrint}
+            disabled={!certAccountableName.trim() || !certPosition.trim()}
+            sx={{
+              bgcolor: '#0284c7',
+              fontWeight: 700,
+              '&:hover': { bgcolor: '#0369a1' }
+            }}
+          >
+            Proceed to Print
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Notification
+        open={notification.open}
+        message={notification.message}
+        severity={notification.severity}
+        onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+      />
     </Box>
   );
 };

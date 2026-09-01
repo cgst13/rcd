@@ -24,3 +24,19 @@ export const supabase = createClient(
     }
   }
 );
+
+// Create an isolated auth client that does NOT share/persist sessions in localStorage
+// (prevents logging out the active admin when dispatching sign-ups/invites)
+export const createIsolatedAuthClient = () => {
+  return createClient(
+    supabaseUrl || 'https://placeholder.supabase.co',
+    supabaseAnonKey || 'placeholder-key',
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      }
+    }
+  );
+};

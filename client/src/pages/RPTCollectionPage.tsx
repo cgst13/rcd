@@ -34,7 +34,8 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  Button
 } from '@mui/material';
 import { 
   Edit, 
@@ -53,7 +54,8 @@ import {
   Layers,
   AdminPanelSettings,
   Visibility,
-  AddCircleOutline
+  AddCircleOutline,
+  CloudSync
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
@@ -62,7 +64,8 @@ import {
   getRPTCollections, 
   saveRPTCollection, 
   deleteRPTCollectionGroup, 
-  importRPTCollectionsBatch 
+  importRPTCollectionsBatch,
+  syncPendingLocalRPTCollectionsToSupabase
 } from '../services/supabaseService';
 import type { RPTCollectionItem } from '../types/rcd';
 
@@ -132,6 +135,32 @@ const formatExcelDate = (val: any): string => {
   }
 
   return new Date().toISOString().split('T')[0];
+};
+
+const getNextOrNumber = (currentOrNo?: string): string => {
+  if (!currentOrNo) return '';
+  let nextOrNo = currentOrNo.trim();
+  const matchNum = nextOrNo.match(/(\d+)$/);
+  if (matchNum) {
+    const numStr = matchNum[1];
+    const nextNum = parseInt(numStr, 10) + 1;
+    const targetLength = Math.max(numStr.length, 8);
+    const nextNumStr = String(nextNum).padStart(targetLength, '0');
+    nextOrNo = nextOrNo.substring(0, matchNum.index) + nextNumStr;
+  } else if (nextOrNo && !isNaN(Number(nextOrNo))) {
+    nextOrNo = String(Number(nextOrNo) + 1).padStart(8, '0');
+  }
+  return nextOrNo;
+};
+
+const getLatestRptRecord = (items: RPTCollectionItem[]): RPTCollectionItem | null => {
+  if (!items || items.length === 0) return null;
+  const sorted = [...items].sort((a, b) => {
+    if (a.id && b.id && a.id !== b.id) return b.id - a.id;
+    if (a.date && b.date && a.date !== b.date) return b.date.localeCompare(a.date);
+    return (b.orNumber || '').localeCompare(a.orNumber || '', undefined, { numeric: true });
+  });
+  return sorted[0] || null;
 };
 
 export const RPTCollectionPage: React.FC = () => {
@@ -216,6 +245,18 @@ export const RPTCollectionPage: React.FC = () => {
     try {
       const data = await getRPTCollections();
       setCollections(data);
+      if (data && data.length > 0) {
+        const latestEntry = getLatestRptRecord(data);
+        if (latestEntry) {
+          const nextOr = getNextOrNumber(latestEntry.orNumber);
+          setFormData(prev => ({
+            ...prev,
+            af56Id: latestEntry.af56Id || prev.af56Id,
+            orNumber: prev.orNumber ? prev.orNumber : nextOr,
+            date: latestEntry.date || prev.date
+          }));
+        }
+      }
     } catch (error) {
       console.error('Failed to load collections', error);
       setNotification({
@@ -237,16 +278,21 @@ export const RPTCollectionPage: React.FC = () => {
   };
 
   const handleOpen = () => {
+    const latestEntry = getLatestRptRecord(collections);
+    const latestAf56 = latestEntry?.af56Id || formData.af56Id || '';
+    const nextOr = latestEntry ? getNextOrNumber(latestEntry.orNumber) : '';
+    const prevDate = latestEntry?.date || new Date().toISOString().split('T')[0];
+
     setFormData({
-      af56Id: '',
-      orNumber: '',
+      af56Id: latestAf56,
+      orNumber: nextOr,
       payor: '',
       barangay: '',
       landName: '',
       tdNumber: '',
       yearsPaid: '',
       amount: 0,
-      date: new Date().toISOString().split('T')[0],
+      date: prevDate,
       remarks: ''
     });
     setIsEditing(false);
@@ -274,6 +320,23 @@ export const RPTCollectionPage: React.FC = () => {
   };
 
   const handleCancelEdit = () => {
+    const latestEntry = getLatestRptRecord(collections);
+    const latestAf56 = latestEntry?.af56Id || formData.af56Id || '';
+    const nextOr = latestEntry ? getNextOrNumber(latestEntry.orNumber) : '';
+    const prevDate = latestEntry?.date || new Date().toISOString().split('T')[0];
+
+    setFormData({
+      af56Id: latestAf56,
+      orNumber: nextOr,
+      payor: '',
+      barangay: '',
+      landName: '',
+      tdNumber: '',
+      yearsPaid: '',
+      amount: 0,
+      date: prevDate,
+      remarks: ''
+    });
     setShowEntryForm(false);
     setIsEditing(false);
     setCurrentId(null);
@@ -291,6 +354,21 @@ export const RPTCollectionPage: React.FC = () => {
       if (success) {
         await loadCollections();
         setShowEntryForm(false);
+        const nextOr = getNextOrNumber(itemToSave.orNumber);
+        const prevDate = itemToSave.date || new Date().toISOString().split('T')[0];
+        const latestAf56 = itemToSave.af56Id || collections.find(item => item.af56Id && item.af56Id.trim() !== '')?.af56Id || formData.af56Id || '';
+        setFormData({
+          af56Id: latestAf56,
+          orNumber: nextOr,
+          payor: '',
+          barangay: '',
+          landName: '',
+          tdNumber: '',
+          yearsPaid: '',
+          amount: 0,
+          date: prevDate,
+          remarks: ''
+        });
         setNotification({
           open: true,
           message: isEditing ? 'RPT collection updated successfully.' : 'RPT collection saved successfully.',
@@ -916,6 +994,7 @@ export const RPTCollectionPage: React.FC = () => {
                   value={formData.orNumber}
                   onChange={(e) => setFormData({ ...formData, orNumber: e.target.value })}
                   placeholder="e.g. 12345678"
+                  helperText={!isEditing ? "Auto-numbered from previous record" : undefined}
                   required
                 />
               </Grid>
@@ -928,6 +1007,7 @@ export const RPTCollectionPage: React.FC = () => {
                   InputLabelProps={{ shrink: true }}
                   value={formData.date}
                   onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  helperText={!isEditing ? "Inherited from previous record" : undefined}
                   required
                 />
               </Grid>
@@ -1020,7 +1100,7 @@ export const RPTCollectionPage: React.FC = () => {
                   <Tooltip title={isEditing ? 'Update Entry' : 'Save Entry'} arrow>
                     <IconButton
                       onClick={handleSave}
-                      disabled={loading || !formData.orNumber || !formData.payor || formData.amount <= 0}
+                      disabled={loading || !formData.orNumber || !formData.payor || isNaN(formData.amount) || formData.amount < 0}
                       sx={{
                         bgcolor: '#0284c7',
                         color: '#ffffff',
@@ -1041,13 +1121,48 @@ export const RPTCollectionPage: React.FC = () => {
       {/* Main Table Paper (Combined by OR No) */}
       <Paper elevation={0} sx={{ overflow: 'hidden', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
         <Box sx={{ p: 2, px: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#0369a1', flexWrap: 'wrap', gap: 1 }}>
-          <Box>
-            <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>
-              RPT Collection Entries
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Combined by OR Number ({groupedRPTCollections.length} total receipts)
-            </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+            <Box>
+              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>
+                RPT Collection Entries
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Combined by OR Number ({groupedRPTCollections.length} total receipts)
+              </Typography>
+            </Box>
+            <Tooltip title="Upload any local offline RPT entries directly to Supabase cloud">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<CloudSync fontSize="small" />}
+                onClick={async () => {
+                  setLoading(true);
+                  const syncedCount = await syncPendingLocalRPTCollectionsToSupabase();
+                  await loadCollections();
+                  setLoading(false);
+                  setNotification({
+                    open: true,
+                    message: syncedCount > 0 
+                      ? `Successfully synced ${syncedCount} local RPT entries to Supabase!` 
+                      : 'All local RPT entries are already synced to Supabase.',
+                    severity: 'success'
+                  });
+                }}
+                sx={{ 
+                  ml: { xs: 0, sm: 1 }, 
+                  textTransform: 'none', 
+                  fontSize: '0.75rem', 
+                  py: 0.25,
+                  px: 1.25,
+                  borderRadius: 1.5,
+                  borderColor: '#0284c7',
+                  color: '#0284c7',
+                  '&:hover': { borderColor: '#0369a1', bgcolor: '#f0f9ff' }
+                }}
+              >
+                Sync to Cloud
+              </Button>
+            </Tooltip>
           </Box>
           <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0284c7' }}>
             Total: ₱ {totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}

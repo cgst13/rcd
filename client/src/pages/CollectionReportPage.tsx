@@ -33,7 +33,8 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Collapse
+  Collapse,
+  Button
 } from '@mui/material';
 import { 
   AddCircleOutline, 
@@ -57,7 +58,8 @@ import {
   KeyboardArrowUp,
   AdminPanelSettings,
   Visibility,
-  Refresh
+  Refresh,
+  CloudSync
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
@@ -68,7 +70,8 @@ import {
   saveCollectionEntryBulk, 
   deleteCollectionGroup,
   updateCollectionGroup,
-  importCollectionsBatch
+  importCollectionsBatch,
+  syncPendingLocalCollectionsToSupabase
 } from '../services/supabaseService';
 import type { AccountCode } from '../types/rcd';
 import type { CollectionItem } from '../services/supabaseService';
@@ -792,17 +795,34 @@ export const CollectionReportPage: React.FC = () => {
       return;
     }
 
-    const preparedCharges = charges.map(c => ({
-      subCategory: c.subCategory,
-      mainCategory: c.mainCategory,
-      accountCode: c.accountCode,
-      amount: Number(c.amount) || 0
-    })).filter(c => c.subCategory && c.amount > 0);
+    const preparedCharges = charges
+      .map(c => ({
+        subCategory: c.subCategory?.trim() || '',
+        mainCategory: c.mainCategory?.trim() || '',
+        accountCode: c.accountCode?.trim() || '',
+        amount: isNaN(Number(c.amount)) ? 0 : Number(c.amount)
+      }))
+      .filter((c, _idx, arr) => {
+        // If only one charge row exists, keep it to allow 0 amount / cancelled OR
+        if (arr.length === 1) return true;
+        // If multiple rows exist, keep rows that have subCategory or amount > 0
+        return c.subCategory !== '' || c.amount > 0;
+      });
 
     if (preparedCharges.length === 0) {
       setNotification({
         open: true,
-        message: 'Please enter at least one charge with a Sub Category and an Amount > 0.',
+        message: 'Please enter at least one charge line.',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    const hasNegativeAmount = preparedCharges.some(c => c.amount < 0);
+    if (hasNegativeAmount) {
+      setNotification({
+        open: true,
+        message: 'Charge amount cannot be negative.',
         severity: 'warning'
       });
       return;
@@ -1510,9 +1530,44 @@ export const CollectionReportPage: React.FC = () => {
       {/* Main Table Card (Grouped by OR No) */}
       <Paper elevation={0} sx={{ overflow: 'hidden', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
         <Box sx={{ p: 2, px: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#0369a1', flexWrap: 'wrap', gap: 1 }}>
-          <Box>
-            <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>Recent Entries</Typography>
-            <Typography variant="caption" color="text.secondary">Combined by OR Number ({groupedCollections.length} total receipts)</Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+            <Box>
+              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>Recent Entries</Typography>
+              <Typography variant="caption" color="text.secondary">Combined by OR Number ({groupedCollections.length} total receipts)</Typography>
+            </Box>
+            <Tooltip title="Upload any local offline entries directly to Supabase cloud">
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<CloudSync fontSize="small" />}
+                onClick={async () => {
+                  setLoading(true);
+                  const syncedCount = await syncPendingLocalCollectionsToSupabase();
+                  await loadData();
+                  setLoading(false);
+                  setNotification({
+                    open: true,
+                    message: syncedCount > 0 
+                      ? `Successfully synced ${syncedCount} local entries to Supabase!` 
+                      : 'All local entries are already synced to Supabase.',
+                    severity: 'success'
+                  });
+                }}
+                sx={{ 
+                  ml: { xs: 0, sm: 1 }, 
+                  textTransform: 'none', 
+                  fontSize: '0.75rem', 
+                  py: 0.25,
+                  px: 1.25,
+                  borderRadius: 1.5,
+                  borderColor: '#0284c7',
+                  color: '#0284c7',
+                  '&:hover': { borderColor: '#0369a1', bgcolor: '#f0f9ff' }
+                }}
+              >
+                Sync to Cloud
+              </Button>
+            </Tooltip>
           </Box>
           <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0284c7' }}>Total: ₱ {totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</Typography>
         </Box>
@@ -1678,10 +1733,10 @@ export const CollectionReportPage: React.FC = () => {
                                 {group.items.map((item, idx) => (
                                   <TableRow key={item.id || idx} hover>
                                     <TableCell sx={{ color: '#64748b' }}>{idx + 1}</TableCell>
-                                    <TableCell sx={{ fontWeight: 600 }}>{item.subCategory}</TableCell>
-                                    <TableCell>{item.mainCategory}</TableCell>
+                                    <TableCell sx={{ fontWeight: 600 }}>{item.subCategory || '-'}</TableCell>
+                                    <TableCell>{item.mainCategory || '-'}</TableCell>
                                     <TableCell sx={{ fontFamily: 'monospace', bgcolor: '#f0f9ff', color: '#0369a1', px: 1, borderRadius: 1 }}>
-                                      {item.accountCode}
+                                      {item.accountCode || '-'}
                                     </TableCell>
                                     <TableCell align="right" sx={{ fontWeight: 700 }}>
                                       ₱ {(item.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
