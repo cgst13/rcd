@@ -59,7 +59,8 @@ import {
   AdminPanelSettings,
   Visibility,
   Refresh,
-  CloudSync
+  CloudSync,
+  Person
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
@@ -71,7 +72,9 @@ import {
   deleteCollectionGroup,
   updateCollectionGroup,
   importCollectionsBatch,
-  syncPendingLocalCollectionsToSupabase
+  syncPendingLocalCollectionsToSupabase,
+  getAllManagedUsers,
+  type ManagedUser
 } from '../services/supabaseService';
 import type { AccountCode } from '../types/rcd';
 import type { CollectionItem } from '../services/supabaseService';
@@ -84,6 +87,8 @@ export interface GroupedCollection {
   date: string;
   remarks: string;
   totalAmount: number;
+  collectorEmail?: string;
+  collectorName?: string;
   items: CollectionItem[];
   itemIds: number[];
 }
@@ -156,7 +161,7 @@ const formatExcelDate = (val: any): string => {
 
 export const CollectionReportPage: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
+  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator' || user?.role?.toLowerCase() === 'superadmin';
 
   const payorRef = useRef<HTMLInputElement>(null);
   const subCategoryRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -203,6 +208,7 @@ export const CollectionReportPage: React.FC = () => {
 
   const [accountCodes, setAccountCodes] = useState<AccountCode[]>([]);
   const [items, setItems] = useState<CollectionItem[]>([]);
+  const [usersList, setUsersList] = useState<ManagedUser[]>([]);
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -228,12 +234,14 @@ export const CollectionReportPage: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [codes, collectionEntries] = await Promise.all([
+      const [codes, collectionEntries, managedUsers] = await Promise.all([
         getAccountCodes(),
-        getCollectionEntries()
+        getCollectionEntries(),
+        getAllManagedUsers()
       ]);
       setAccountCodes(codes);
       setItems(collectionEntries);
+      setUsersList(managedUsers);
       if (collectionEntries.length > 0) {
         const latestEntry = collectionEntries[0];
         setForm(prev => ({
@@ -646,13 +654,40 @@ export const CollectionReportPage: React.FC = () => {
     return map;
   }, [accountCodes]);
 
+  // Users lookup map to resolve collector names from userId or email
+  const usersMap = useMemo(() => {
+    const map = new Map<string, string>();
+    usersList.forEach(u => {
+      const name = u.fullName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
+      if (u.id) map.set(u.id, name);
+      if (u.email) map.set(u.email.toLowerCase().trim(), name);
+    });
+    return map;
+  }, [usersList]);
+
+  // Determine if active search or filters are applied
+  const isSearching = !!searchTerm.trim() || !!filterAfNo || !!filterSubCategory || !!filterDate;
+
   const filteredItems = useMemo(() => {
+    // For Admins: Do NOT display recent entries by default; only display when searched
+    if (isAdmin && !isSearching) {
+      return [];
+    }
+
     return items.filter(item => {
+      const term = searchTerm.toLowerCase().trim();
+      const collectorName = (item.userId && usersMap.get(item.userId)) || 
+                            (item.collectorEmail && usersMap.get(item.collectorEmail.toLowerCase().trim())) || 
+                            '';
+
       const matchesSearch = 
-        (item.payor?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (item.orNo?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (item.remarks?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-        (item.accountCode?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+        !term ||
+        (item.payor?.toLowerCase() || '').includes(term) ||
+        (item.orNo?.toLowerCase() || '').includes(term) ||
+        (item.remarks?.toLowerCase() || '').includes(term) ||
+        (item.accountCode?.toLowerCase() || '').includes(term) ||
+        (item.collectorEmail?.toLowerCase() || '').includes(term) ||
+        collectorName.toLowerCase().includes(term);
 
       const matchesAfNo = !filterAfNo || item.afNo === filterAfNo;
       const matchesSubCategory = !filterSubCategory || item.subCategory === filterSubCategory;
@@ -660,7 +695,7 @@ export const CollectionReportPage: React.FC = () => {
 
       return matchesSearch && matchesAfNo && matchesSubCategory && matchesDate;
     });
-  }, [items, searchTerm, filterAfNo, filterSubCategory, filterDate]);
+  }, [items, searchTerm, filterAfNo, filterSubCategory, filterDate, isAdmin, isSearching, usersMap]);
 
   // Group items by OR Number (and AF No) and sort by Date & OR No
   const groupedCollections: GroupedCollection[] = useMemo(() => {
@@ -669,6 +704,12 @@ export const CollectionReportPage: React.FC = () => {
     filteredItems.forEach(item => {
       const key = `${item.afNo || '93C'}__${item.orNo || ''}`;
       if (!groups[key]) {
+        const cEmail = item.collectorEmail?.toLowerCase().trim();
+        const cName = (item.userId && usersMap.get(item.userId)) || 
+                      (cEmail && usersMap.get(cEmail)) || 
+                      item.collectorEmail || 
+                      'Collector';
+
         groups[key] = {
           key,
           afNo: item.afNo || '',
@@ -677,6 +718,8 @@ export const CollectionReportPage: React.FC = () => {
           date: item.date || '',
           remarks: item.remarks || '',
           totalAmount: 0,
+          collectorEmail: item.collectorEmail,
+          collectorName: cName,
           items: [],
           itemIds: []
         };
@@ -704,7 +747,7 @@ export const CollectionReportPage: React.FC = () => {
       }
       return orB.localeCompare(orA);
     });
-  }, [filteredItems]);
+  }, [filteredItems, usersMap]);
 
   const visibleGroups = useMemo(() => {
     return groupedCollections.slice(
@@ -1532,8 +1575,16 @@ export const CollectionReportPage: React.FC = () => {
         <Box sx={{ p: 2, px: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#0369a1', flexWrap: 'wrap', gap: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
             <Box>
-              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>Recent Entries</Typography>
-              <Typography variant="caption" color="text.secondary">Combined by OR Number ({groupedCollections.length} total receipts)</Typography>
+              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>
+                {isAdmin ? (isSearching ? "Search Results" : "Collection Lookup") : "Recent Entries"}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {isAdmin 
+                  ? (isSearching 
+                      ? `${groupedCollections.length} receipt${groupedCollections.length !== 1 ? 's' : ''} found` 
+                      : 'Search by payor name or OR number to view records') 
+                  : `Combined by OR Number (${groupedCollections.length} total receipts)`}
+              </Typography>
             </Box>
             <Tooltip title="Upload any local offline entries directly to Supabase cloud">
               <Button
@@ -1574,21 +1625,32 @@ export const CollectionReportPage: React.FC = () => {
         
         <Box sx={{ p: 2, bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
           <Grid container spacing={2} alignItems="center">
-            <Grid size={{ xs: 12, md: 3 }}>
+            <Grid size={{ xs: 12, md: isAdmin ? 4 : 3 }}>
               <TextField 
-                label="Search" 
-                placeholder="OR No, Payor, Remarks..."
+                label={isAdmin ? "Search (Payor Name, OR No...)" : "Search"} 
+                placeholder="Search payor name, OR number..."
                 fullWidth 
                 size="small"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setPage(0);
+                }}
+                autoFocus={isAdmin}
                 slotProps={{
                   input: {
                     startAdornment: (
                       <InputAdornment position="start">
-                        <Search fontSize="small" color="action" />
+                        <Search fontSize="small" color="primary" />
                       </InputAdornment>
                     ),
+                    endAdornment: searchTerm ? (
+                      <InputAdornment position="end">
+                        <IconButton size="small" onClick={() => setSearchTerm('')}>
+                          <Clear fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    ) : undefined
                   }
                 }}
               />
@@ -1638,14 +1700,14 @@ export const CollectionReportPage: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 48 }} />
-                <TableCell>AF No.</TableCell>
-                <TableCell>OR No.</TableCell>
-                <TableCell>Payor</TableCell>
-                <TableCell>Line Items</TableCell>
-                <TableCell>Date</TableCell>
-                <TableCell>Remarks</TableCell>
-                <TableCell align="right">Total Amount</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>AF No.</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>OR No.</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Payor</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Line Items</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
+                <TableCell sx={{ fontWeight: 'bold' }}>Collector Name</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1676,9 +1738,16 @@ export const CollectionReportPage: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell>{group.date || '-'}</TableCell>
-                      <TableCell sx={{ color: '#64748b' }}>{group.remarks || '-'}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 800, color: '#0f172a', fontSize: '0.95rem' }}>
                         ₱ {group.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Person sx={{ fontSize: 16, color: '#64748b' }} />
+                          <Typography variant="body2" fontWeight="600" sx={{ color: '#334155' }}>
+                            {group.collectorName || 'Collector'}
+                          </Typography>
+                        </Box>
                       </TableCell>
                       <TableCell align="right">
                         {!isAdmin ? (
@@ -1716,7 +1785,7 @@ export const CollectionReportPage: React.FC = () => {
                                 Charge Line Breakdown for OR #{group.orNo}
                               </Typography>
                               <Typography variant="caption" color="text.secondary">
-                                Payor: <strong>{group.payor}</strong> • Date: <strong>{group.date}</strong>
+                                Payor: <strong>{group.payor}</strong> • Date: <strong>{group.date}</strong> • Collector: <strong>{group.collectorName}</strong>
                               </Typography>
                             </Box>
                             <Table size="small">
@@ -1752,18 +1821,36 @@ export const CollectionReportPage: React.FC = () => {
                   </React.Fragment>
                 );
               })}
-              {groupedCollections.length === 0 && (
+              {isAdmin && !isSearching ? (
+                <TableRow>
+                  <TableCell colSpan={9} align="center" sx={{ py: 8 }}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5, maxWidth: 480, mx: 'auto' }}>
+                      <Box sx={{ p: 2, bgcolor: '#f0f9ff', color: '#0284c7', borderRadius: '50%', mb: 0.5 }}>
+                        <Search sx={{ fontSize: 36 }} />
+                      </Box>
+                      <Typography variant="h6" fontWeight="800" sx={{ color: '#0f172a' }}>
+                        Search Collection Records
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', lineHeight: 1.6 }}>
+                        As an administrator, recent collection entries are hidden by default. Enter a <strong>Payor Name</strong> or <strong>Official Receipt (OR) Number</strong> in the search bar above to view records.
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              ) : groupedCollections.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                       <TableChart sx={{ color: '#94a3b8', fontSize: 40 }} />
                       <Typography color="text.secondary" variant="body1" fontWeight="600">
-                        {loading ? 'Loading entries...' : 'No collection entries added yet.'}
+                        {loading 
+                          ? 'Loading entries...' 
+                          : (isSearching ? 'No collection records found matching your search.' : 'No collection entries added yet.')}
                       </Typography>
                     </Box>
                   </TableCell>
                 </TableRow>
-              )}
+              ) : null}
             </TableBody>
           </Table>
         </TableContainer>
