@@ -44,16 +44,9 @@ import {
 import type { RCDReport, Signatory, RPTCollectionItem } from '../types/rcd';
 import { useAuth } from '../context/useAuth';
 import { Notification } from '../components/Notification';
-import { AdminReportsPage } from './AdminReportsPage';
 
 export const ReportsPage: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator' || user?.role?.toLowerCase() === 'superadmin';
-
-  if (isAdmin) {
-    return <AdminReportsPage />;
-  }
-
   const [, setReports] = useState<RCDReport[]>([]);
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [rptCollections, setRptCollections] = useState<RPTCollectionItem[]>([]);

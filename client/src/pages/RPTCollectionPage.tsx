@@ -35,7 +35,8 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Button
+  Button,
+  Avatar
 } from '@mui/material';
 import { 
   Edit, 
@@ -55,7 +56,8 @@ import {
   AdminPanelSettings,
   Visibility,
   AddCircleOutline,
-  CloudSync
+  CloudSync,
+  Person
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
@@ -65,7 +67,8 @@ import {
   saveRPTCollection, 
   deleteRPTCollectionGroup, 
   importRPTCollectionsBatch,
-  syncPendingLocalRPTCollectionsToSupabase
+  syncPendingLocalRPTCollectionsToSupabase,
+  getAllManagedUsers
 } from '../services/supabaseService';
 import type { RPTCollectionItem } from '../types/rcd';
 
@@ -181,6 +184,9 @@ export const RPTCollectionPage: React.FC = () => {
     severity: 'success' | 'error' | 'info' | 'warning';
   }>({ open: false, message: '', severity: 'info' });
 
+  // User Map State (for resolving collector names)
+  const [usersMap, setUsersMap] = useState<Record<string, string>>({});
+
   // Pagination State
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -243,8 +249,22 @@ export const RPTCollectionPage: React.FC = () => {
   const loadCollections = async () => {
     setLoading(true);
     try {
-      const data = await getRPTCollections();
+      const [data, managedUsers] = await Promise.all([
+        getRPTCollections(),
+        getAllManagedUsers().catch(() => [])
+      ]);
       setCollections(data);
+
+      if (managedUsers && managedUsers.length > 0) {
+        const map: Record<string, string> = {};
+        managedUsers.forEach(u => {
+          const name = u.fullName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
+          if (u.email) map[u.email.toLowerCase().trim()] = name;
+          if (u.id) map[u.id.toLowerCase().trim()] = name;
+        });
+        setUsersMap(map);
+      }
+
       if (data && data.length > 0) {
         const latestEntry = getLatestRptRecord(data);
         if (latestEntry) {
@@ -267,6 +287,20 @@ export const RPTCollectionPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getCollectorName = (email?: string, userId?: string): string => {
+    if (email && usersMap[email.toLowerCase().trim()]) {
+      return usersMap[email.toLowerCase().trim()];
+    }
+    if (userId && usersMap[userId.toLowerCase().trim()]) {
+      return usersMap[userId.toLowerCase().trim()];
+    }
+    if (email) {
+      const namePart = email.split('@')[0];
+      return namePart.replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    return 'Municipal Collector';
   };
 
   useEffect(() => {
@@ -1299,9 +1333,26 @@ export const RPTCollectionPage: React.FC = () => {
                           </Stack>
                         ) : (
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                            <Tooltip title={isExpanded ? "Collapse Breakdown" : "View Breakdown"} arrow>
-                              <IconButton size="small" color="primary" onClick={() => toggleRow(group.key)} sx={{ bgcolor: '#f0f9ff' }}>
+                            <Tooltip title="View Receipt Details (with Collector Name)" arrow>
+                              <IconButton 
+                                size="small" 
+                                color="primary" 
+                                onClick={() => {
+                                  setSelectedItem(group.items[0]);
+                                  setViewDialogOpen(true);
+                                }} 
+                                sx={{ bgcolor: '#f0f9ff', '&:hover': { bgcolor: '#e0f2fe' } }}
+                              >
                                 <Visibility fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={isExpanded ? "Collapse Breakdown" : "Expand Breakdown"} arrow>
+                              <IconButton 
+                                size="small" 
+                                onClick={() => toggleRow(group.key)} 
+                                sx={{ bgcolor: '#f8fafc', color: '#64748b', '&:hover': { bgcolor: '#e2e8f0' } }}
+                              >
+                                {isExpanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
                               </IconButton>
                             </Tooltip>
                           </Stack>
@@ -1314,13 +1365,26 @@ export const RPTCollectionPage: React.FC = () => {
                       <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={10}>
                         <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                           <Box sx={{ margin: 1.5, p: 2, bgcolor: '#f8fafc', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                              <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1' }}>
-                                Real Property Payment Breakdown for OR #{group.orNumber}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                Payor: <strong>{group.payor}</strong> • Date: <strong>{group.date}</strong>
-                              </Typography>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+                              <Box>
+                                <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1' }}>
+                                  Real Property Payment Breakdown for OR #{group.orNumber}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Payor: <strong>{group.payor}</strong> • Date: <strong>{group.date}</strong>
+                                  {isAdmin && (
+                                    <> • Collector: <strong style={{ color: '#0284c7' }}>{getCollectorName(group.items[0]?.collectorEmail, group.items[0]?.userId)}</strong></>
+                                  )}
+                                </Typography>
+                              </Box>
+                              {isAdmin && (
+                                <Chip
+                                  icon={<Person sx={{ fontSize: '15px !important' }} />}
+                                  label={`Collector: ${getCollectorName(group.items[0]?.collectorEmail, group.items[0]?.userId)}`}
+                                  size="small"
+                                  sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: '0.75rem', border: '1px solid #bae6fd' }}
+                                />
+                              )}
                             </Box>
                             <Table size="small">
                               <TableHead>
@@ -1601,6 +1665,44 @@ export const RPTCollectionPage: React.FC = () => {
         <DialogContent sx={{ pt: 2.5 }}>
           {selectedItem && (
             <Grid container spacing={2}>
+              {/* Collector Information Card (Highlighted for Admins) */}
+              <Grid size={{ xs: 12 }}>
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 1.5,
+                    bgcolor: '#f0f9ff',
+                    borderRadius: 1.5,
+                    border: '1px solid #bae6fd',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5
+                  }}
+                >
+                  <Avatar sx={{ bgcolor: '#0284c7', color: '#ffffff', width: 40, height: 40, fontSize: '0.95rem', fontWeight: 'bold' }}>
+                    {getCollectorName(selectedItem.collectorEmail, selectedItem.userId).charAt(0).toUpperCase()}
+                  </Avatar>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="caption" sx={{ color: '#0369a1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Recorded By (Collector)
+                    </Typography>
+                    <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0f172a' }}>
+                      {getCollectorName(selectedItem.collectorEmail, selectedItem.userId)}
+                    </Typography>
+                    {selectedItem.collectorEmail && (
+                      <Typography variant="caption" color="text.secondary">
+                        {selectedItem.collectorEmail}
+                      </Typography>
+                    )}
+                  </Box>
+                  <Chip
+                    label="Collector"
+                    size="small"
+                    sx={{ bgcolor: '#bae6fd', color: '#0369a1', fontWeight: 700, fontSize: '0.75rem' }}
+                  />
+                </Paper>
+              </Grid>
+
               <Grid size={{ xs: 6 }}>
                 <Typography variant="caption" color="text.secondary">AF56 ID</Typography>
                 <Typography variant="body1" fontWeight="600">{selectedItem.af56Id || '-'}</Typography>

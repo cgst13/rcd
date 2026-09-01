@@ -34,7 +34,9 @@ import {
   Select,
   MenuItem,
   Collapse,
-  Button
+  Button,
+  Avatar,
+  Divider
 } from '@mui/material';
 import { 
   AddCircleOutline, 
@@ -73,8 +75,7 @@ import {
   updateCollectionGroup,
   importCollectionsBatch,
   syncPendingLocalCollectionsToSupabase,
-  getAllManagedUsers,
-  type ManagedUser
+  getAllManagedUsers
 } from '../services/supabaseService';
 import type { AccountCode } from '../types/rcd';
 import type { CollectionItem } from '../services/supabaseService';
@@ -87,10 +88,10 @@ export interface GroupedCollection {
   date: string;
   remarks: string;
   totalAmount: number;
-  collectorEmail?: string;
-  collectorName?: string;
   items: CollectionItem[];
   itemIds: number[];
+  collectorEmail?: string;
+  userId?: string;
 }
 
 const getNextOrNo = (currentOrNo: string): string => {
@@ -161,7 +162,7 @@ const formatExcelDate = (val: any): string => {
 
 export const CollectionReportPage: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator' || user?.role?.toLowerCase() === 'superadmin';
+  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
 
   const payorRef = useRef<HTMLInputElement>(null);
   const subCategoryRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -208,7 +209,13 @@ export const CollectionReportPage: React.FC = () => {
 
   const [accountCodes, setAccountCodes] = useState<AccountCode[]>([]);
   const [items, setItems] = useState<CollectionItem[]>([]);
-  const [usersList, setUsersList] = useState<ManagedUser[]>([]);
+
+  // Details View Dialog State
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<GroupedCollection | null>(null);
+
+  // User Map State (for resolving collector names)
+  const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -237,11 +244,21 @@ export const CollectionReportPage: React.FC = () => {
       const [codes, collectionEntries, managedUsers] = await Promise.all([
         getAccountCodes(),
         getCollectionEntries(),
-        getAllManagedUsers()
+        getAllManagedUsers().catch(() => [])
       ]);
       setAccountCodes(codes);
       setItems(collectionEntries);
-      setUsersList(managedUsers);
+
+      if (managedUsers && managedUsers.length > 0) {
+        const map: Record<string, string> = {};
+        managedUsers.forEach(u => {
+          const name = u.fullName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
+          if (u.email) map[u.email.toLowerCase().trim()] = name;
+          if (u.id) map[u.id.toLowerCase().trim()] = name;
+        });
+        setUsersMap(map);
+      }
+
       if (collectionEntries.length > 0) {
         const latestEntry = collectionEntries[0];
         setForm(prev => ({
@@ -261,6 +278,20 @@ export const CollectionReportPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const getCollectorName = (email?: string, userId?: string): string => {
+    if (email && usersMap[email.toLowerCase().trim()]) {
+      return usersMap[email.toLowerCase().trim()];
+    }
+    if (userId && usersMap[userId.toLowerCase().trim()]) {
+      return usersMap[userId.toLowerCase().trim()];
+    }
+    if (email) {
+      const namePart = email.split('@')[0];
+      return namePart.replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    return 'Municipal Collector';
   };
 
   useEffect(() => {
@@ -654,40 +685,13 @@ export const CollectionReportPage: React.FC = () => {
     return map;
   }, [accountCodes]);
 
-  // Users lookup map to resolve collector names from userId or email
-  const usersMap = useMemo(() => {
-    const map = new Map<string, string>();
-    usersList.forEach(u => {
-      const name = u.fullName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
-      if (u.id) map.set(u.id, name);
-      if (u.email) map.set(u.email.toLowerCase().trim(), name);
-    });
-    return map;
-  }, [usersList]);
-
-  // Determine if active search or filters are applied
-  const isSearching = !!searchTerm.trim() || !!filterAfNo || !!filterSubCategory || !!filterDate;
-
   const filteredItems = useMemo(() => {
-    // For Admins: Do NOT display recent entries by default; only display when searched
-    if (isAdmin && !isSearching) {
-      return [];
-    }
-
     return items.filter(item => {
-      const term = searchTerm.toLowerCase().trim();
-      const collectorName = (item.userId && usersMap.get(item.userId)) || 
-                            (item.collectorEmail && usersMap.get(item.collectorEmail.toLowerCase().trim())) || 
-                            '';
-
       const matchesSearch = 
-        !term ||
-        (item.payor?.toLowerCase() || '').includes(term) ||
-        (item.orNo?.toLowerCase() || '').includes(term) ||
-        (item.remarks?.toLowerCase() || '').includes(term) ||
-        (item.accountCode?.toLowerCase() || '').includes(term) ||
-        (item.collectorEmail?.toLowerCase() || '').includes(term) ||
-        collectorName.toLowerCase().includes(term);
+        (item.payor?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (item.orNo?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (item.remarks?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (item.accountCode?.toLowerCase() || '').includes(searchTerm.toLowerCase());
 
       const matchesAfNo = !filterAfNo || item.afNo === filterAfNo;
       const matchesSubCategory = !filterSubCategory || item.subCategory === filterSubCategory;
@@ -695,7 +699,7 @@ export const CollectionReportPage: React.FC = () => {
 
       return matchesSearch && matchesAfNo && matchesSubCategory && matchesDate;
     });
-  }, [items, searchTerm, filterAfNo, filterSubCategory, filterDate, isAdmin, isSearching, usersMap]);
+  }, [items, searchTerm, filterAfNo, filterSubCategory, filterDate]);
 
   // Group items by OR Number (and AF No) and sort by Date & OR No
   const groupedCollections: GroupedCollection[] = useMemo(() => {
@@ -704,12 +708,6 @@ export const CollectionReportPage: React.FC = () => {
     filteredItems.forEach(item => {
       const key = `${item.afNo || '93C'}__${item.orNo || ''}`;
       if (!groups[key]) {
-        const cEmail = item.collectorEmail?.toLowerCase().trim();
-        const cName = (item.userId && usersMap.get(item.userId)) || 
-                      (cEmail && usersMap.get(cEmail)) || 
-                      item.collectorEmail || 
-                      'Collector';
-
         groups[key] = {
           key,
           afNo: item.afNo || '',
@@ -718,15 +716,21 @@ export const CollectionReportPage: React.FC = () => {
           date: item.date || '',
           remarks: item.remarks || '',
           totalAmount: 0,
-          collectorEmail: item.collectorEmail,
-          collectorName: cName,
           items: [],
-          itemIds: []
+          itemIds: [],
+          collectorEmail: item.collectorEmail,
+          userId: item.userId
         };
       }
       groups[key].items.push(item);
       groups[key].itemIds.push(item.id);
       groups[key].totalAmount += (item.amount || 0);
+      if (!groups[key].collectorEmail && item.collectorEmail) {
+        groups[key].collectorEmail = item.collectorEmail;
+      }
+      if (!groups[key].userId && item.userId) {
+        groups[key].userId = item.userId;
+      }
     });
 
     return Object.values(groups).sort((a, b) => {
@@ -747,7 +751,7 @@ export const CollectionReportPage: React.FC = () => {
       }
       return orB.localeCompare(orA);
     });
-  }, [filteredItems, usersMap]);
+  }, [filteredItems]);
 
   const visibleGroups = useMemo(() => {
     return groupedCollections.slice(
@@ -1575,16 +1579,8 @@ export const CollectionReportPage: React.FC = () => {
         <Box sx={{ p: 2, px: 2.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#0369a1', flexWrap: 'wrap', gap: 1 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
             <Box>
-              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>
-                {isAdmin ? (isSearching ? "Search Results" : "Collection Lookup") : "Recent Entries"}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {isAdmin 
-                  ? (isSearching 
-                      ? `${groupedCollections.length} receipt${groupedCollections.length !== 1 ? 's' : ''} found` 
-                      : 'Search by payor name or OR number to view records') 
-                  : `Combined by OR Number (${groupedCollections.length} total receipts)`}
-              </Typography>
+              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0369a1' }}>Recent Entries</Typography>
+              <Typography variant="caption" color="text.secondary">Combined by OR Number ({groupedCollections.length} total receipts)</Typography>
             </Box>
             <Tooltip title="Upload any local offline entries directly to Supabase cloud">
               <Button
@@ -1625,32 +1621,21 @@ export const CollectionReportPage: React.FC = () => {
         
         <Box sx={{ p: 2, bgcolor: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
           <Grid container spacing={2} alignItems="center">
-            <Grid size={{ xs: 12, md: isAdmin ? 4 : 3 }}>
+            <Grid size={{ xs: 12, md: 3 }}>
               <TextField 
-                label={isAdmin ? "Search (Payor Name, OR No...)" : "Search"} 
-                placeholder="Search payor name, OR number..."
+                label="Search" 
+                placeholder="OR No, Payor, Remarks..."
                 fullWidth 
                 size="small"
                 value={searchTerm}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value);
-                  setPage(0);
-                }}
-                autoFocus={isAdmin}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 slotProps={{
                   input: {
                     startAdornment: (
                       <InputAdornment position="start">
-                        <Search fontSize="small" color="primary" />
+                        <Search fontSize="small" color="action" />
                       </InputAdornment>
                     ),
-                    endAdornment: searchTerm ? (
-                      <InputAdornment position="end">
-                        <IconButton size="small" onClick={() => setSearchTerm('')}>
-                          <Clear fontSize="small" />
-                        </IconButton>
-                      </InputAdornment>
-                    ) : undefined
                   }
                 }}
               />
@@ -1700,14 +1685,14 @@ export const CollectionReportPage: React.FC = () => {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: 48 }} />
-                <TableCell sx={{ fontWeight: 'bold' }}>AF No.</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>OR No.</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Payor</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Line Items</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Date</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Amount</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Collector Name</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>Actions</TableCell>
+                <TableCell>AF No.</TableCell>
+                <TableCell>OR No.</TableCell>
+                <TableCell>Payor</TableCell>
+                <TableCell>Line Items</TableCell>
+                <TableCell>Date</TableCell>
+                <TableCell>Remarks</TableCell>
+                <TableCell align="right">Total Amount</TableCell>
+                <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1738,16 +1723,9 @@ export const CollectionReportPage: React.FC = () => {
                         />
                       </TableCell>
                       <TableCell>{group.date || '-'}</TableCell>
+                      <TableCell sx={{ color: '#64748b' }}>{group.remarks || '-'}</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 800, color: '#0f172a', fontSize: '0.95rem' }}>
                         ₱ {group.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Person sx={{ fontSize: 16, color: '#64748b' }} />
-                          <Typography variant="body2" fontWeight="600" sx={{ color: '#334155' }}>
-                            {group.collectorName || 'Collector'}
-                          </Typography>
-                        </Box>
                       </TableCell>
                       <TableCell align="right">
                         {!isAdmin ? (
@@ -1765,9 +1743,26 @@ export const CollectionReportPage: React.FC = () => {
                           </Stack>
                         ) : (
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-                            <Tooltip title={isExpanded ? "Collapse Details" : "View Breakdown"} arrow>
-                              <IconButton size="small" color="primary" onClick={() => toggleRow(group.key)} sx={{ bgcolor: '#f0f9ff' }}>
+                            <Tooltip title="View Complete Details (with Collector Name)" arrow>
+                              <IconButton 
+                                size="small" 
+                                color="primary" 
+                                onClick={() => {
+                                  setSelectedGroup(group);
+                                  setViewDialogOpen(true);
+                                }} 
+                                sx={{ bgcolor: '#f0f9ff', '&:hover': { bgcolor: '#e0f2fe' } }}
+                              >
                                 <Visibility fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={isExpanded ? "Collapse Details" : "Expand Breakdown"} arrow>
+                              <IconButton 
+                                size="small" 
+                                onClick={() => toggleRow(group.key)} 
+                                sx={{ bgcolor: '#f8fafc', color: '#64748b', '&:hover': { bgcolor: '#e2e8f0' } }}
+                              >
+                                {isExpanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
                               </IconButton>
                             </Tooltip>
                           </Stack>
@@ -1780,13 +1775,26 @@ export const CollectionReportPage: React.FC = () => {
                       <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={9}>
                         <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                           <Box sx={{ margin: 1.5, p: 2, bgcolor: '#f8fafc', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
-                              <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1' }}>
-                                Charge Line Breakdown for OR #{group.orNo}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                Payor: <strong>{group.payor}</strong> • Date: <strong>{group.date}</strong> • Collector: <strong>{group.collectorName}</strong>
-                              </Typography>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+                              <Box>
+                                <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1' }}>
+                                  Charge Line Breakdown for OR #{group.orNo}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Payor: <strong>{group.payor}</strong> • Date: <strong>{group.date}</strong>
+                                  {isAdmin && (
+                                    <> • Collector: <strong style={{ color: '#0284c7' }}>{getCollectorName(group.collectorEmail, group.userId)}</strong></>
+                                  )}
+                                </Typography>
+                              </Box>
+                              {isAdmin && (
+                                <Chip
+                                  icon={<Person sx={{ fontSize: '15px !important' }} />}
+                                  label={`Collector: ${getCollectorName(group.collectorEmail, group.userId)}`}
+                                  size="small"
+                                  sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: '0.75rem', border: '1px solid #bae6fd' }}
+                                />
+                              )}
                             </Box>
                             <Table size="small">
                               <TableHead>
@@ -1821,36 +1829,18 @@ export const CollectionReportPage: React.FC = () => {
                   </React.Fragment>
                 );
               })}
-              {isAdmin && !isSearching ? (
-                <TableRow>
-                  <TableCell colSpan={9} align="center" sx={{ py: 8 }}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5, maxWidth: 480, mx: 'auto' }}>
-                      <Box sx={{ p: 2, bgcolor: '#f0f9ff', color: '#0284c7', borderRadius: '50%', mb: 0.5 }}>
-                        <Search sx={{ fontSize: 36 }} />
-                      </Box>
-                      <Typography variant="h6" fontWeight="800" sx={{ color: '#0f172a' }}>
-                        Search Collection Records
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#64748b', textAlign: 'center', lineHeight: 1.6 }}>
-                        As an administrator, recent collection entries are hidden by default. Enter a <strong>Payor Name</strong> or <strong>Official Receipt (OR) Number</strong> in the search bar above to view records.
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ) : groupedCollections.length === 0 ? (
+              {groupedCollections.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={9} align="center" sx={{ py: 6 }}>
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                       <TableChart sx={{ color: '#94a3b8', fontSize: 40 }} />
                       <Typography color="text.secondary" variant="body1" fontWeight="600">
-                        {loading 
-                          ? 'Loading entries...' 
-                          : (isSearching ? 'No collection records found matching your search.' : 'No collection entries added yet.')}
+                        {loading ? 'Loading entries...' : 'No collection entries added yet.'}
                       </Typography>
                     </Box>
                   </TableCell>
                 </TableRow>
-              ) : null}
+              )}
             </TableBody>
           </Table>
         </TableContainer>
@@ -2058,6 +2048,164 @@ export const CollectionReportPage: React.FC = () => {
             </IconButton>
           </Tooltip>
         </DialogActions>
+      </Dialog>
+
+      {/* Details View Dialog for Admins / Users */}
+      <Dialog
+        open={viewDialogOpen}
+        onClose={() => setViewDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' } }}
+      >
+        <DialogTitle component="div" sx={{ bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', p: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+            <Box sx={{ width: 40, height: 40, borderRadius: 1.5, bgcolor: '#e0f2fe', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <ReceiptLong />
+            </Box>
+            <Box>
+              <Typography variant="h6" fontWeight="800" sx={{ color: '#0f172a' }}>
+                Collection Receipt Details
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Official Receipt No. {selectedGroup?.orNo} • {selectedGroup?.afNo || 'A.F. NO. 51'}
+              </Typography>
+            </Box>
+          </Box>
+          <Tooltip title="Close" arrow>
+            <IconButton onClick={() => setViewDialogOpen(false)} size="small" sx={{ bgcolor: '#f1f5f9' }}>
+              <Clear fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </DialogTitle>
+
+        <DialogContent sx={{ p: 3 }}>
+          {selectedGroup && (
+            <Stack spacing={2.5}>
+              {/* Collector Information Card (Highlighted for Admins) */}
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 2,
+                  bgcolor: '#f0f9ff',
+                  borderRadius: 1.5,
+                  border: '1px solid #bae6fd',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2
+                }}
+              >
+                <Avatar sx={{ bgcolor: '#0284c7', color: '#ffffff', width: 46, height: 46, fontWeight: 'bold' }}>
+                  {getCollectorName(selectedGroup.collectorEmail, selectedGroup.userId).charAt(0).toUpperCase()}
+                </Avatar>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="caption" sx={{ color: '#0369a1', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    Recorded By (Collector)
+                  </Typography>
+                  <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                    {getCollectorName(selectedGroup.collectorEmail, selectedGroup.userId)}
+                  </Typography>
+                  {selectedGroup.collectorEmail && (
+                    <Typography variant="caption" color="text.secondary">
+                      {selectedGroup.collectorEmail}
+                    </Typography>
+                  )}
+                </Box>
+                <Chip
+                  label="Collector"
+                  size="small"
+                  sx={{ bgcolor: '#bae6fd', color: '#0369a1', fontWeight: 700, fontSize: '0.75rem' }}
+                />
+              </Paper>
+
+              {/* Receipt Summary Grid */}
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 6 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight="600">AF Number</Typography>
+                  <Typography variant="body2" fontWeight="700" sx={{ color: '#1e293b' }}>
+                    {selectedGroup.afNo || 'A.F. NO. 51'}
+                  </Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight="600">Official Receipt (OR) No.</Typography>
+                  <Typography variant="body2" fontWeight="800" sx={{ color: '#0284c7' }}>
+                    {selectedGroup.orNo}
+                  </Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight="600">Date Issued</Typography>
+                  <Typography variant="body2" fontWeight="600" sx={{ color: '#1e293b' }}>
+                    {selectedGroup.date || '-'}
+                  </Typography>
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight="600">Total Amount</Typography>
+                  <Typography variant="h6" fontWeight="800" sx={{ color: '#0284c7' }}>
+                    ₱ {selectedGroup.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </Typography>
+                </Grid>
+                <Grid size={{ xs: 12 }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight="600">Payor / Taxpayer</Typography>
+                  <Typography variant="body1" fontWeight="700" sx={{ color: '#0f172a' }}>
+                    {selectedGroup.payor || '-'}
+                  </Typography>
+                </Grid>
+                {selectedGroup.remarks && (
+                  <Grid size={{ xs: 12 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="600">Remarks</Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {selectedGroup.remarks}
+                    </Typography>
+                  </Grid>
+                )}
+              </Grid>
+
+              <Divider />
+
+              {/* Charge Lines Breakdown */}
+              <Box>
+                <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0f172a', mb: 1.5 }}>
+                  Charge Lines Breakdown ({selectedGroup.items.length})
+                </Typography>
+                <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1 }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ '& th': { bgcolor: '#f8fafc', fontWeight: 700, color: '#475569' } }}>
+                        <TableCell sx={{ width: 36 }}>#</TableCell>
+                        <TableCell>Sub Category</TableCell>
+                        <TableCell>Account Code</TableCell>
+                        <TableCell align="right">Amount</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {selectedGroup.items.map((item, idx) => (
+                        <TableRow key={item.id || idx} hover>
+                          <TableCell sx={{ color: '#94a3b8' }}>{idx + 1}</TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight="600" sx={{ color: '#1e293b' }}>
+                              {item.subCategory || '-'}
+                            </Typography>
+                            {item.mainCategory && (
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                {item.mainCategory}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem', color: '#0369a1' }}>
+                            {item.accountCode || '-'}
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>
+                            ₱ {(item.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
       </Dialog>
     </Box>
   );
