@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   Box, 
   Typography, 
@@ -13,10 +13,7 @@ import {
   Avatar, 
   IconButton, 
   Tooltip, 
-  Chip,
-  Grid,
-  TextField,
-  CircularProgress
+  Chip
 } from '@mui/material';
 import { 
   Notifications, 
@@ -25,19 +22,11 @@ import {
   Security, 
   CloudDownload, 
   DeleteForever, 
-  Info,
-  Save,
-  Badge,
-  CheckCircle
+  Info
 } from '@mui/icons-material';
 import { useAuth } from '../context/useAuth';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
-import { 
-  getCollectorSignatoryProfile, 
-  saveCollectorSignatoryProfile, 
-  type CollectorSignatoryProfile 
-} from '../services/supabaseService';
 
 export const SettingsPage: React.FC = () => {
   const { user } = useAuth();
@@ -48,60 +37,7 @@ export const SettingsPage: React.FC = () => {
     severity: 'success' | 'error' | 'info' | 'warning';
   }>({ open: false, message: '', severity: 'info' });
 
-  // Accountable Name / Collector Signatory State
-  const [collectorProfile, setCollectorProfile] = useState<CollectorSignatoryProfile>({
-    accountableName: '',
-    position: 'Revenue Collection Clerk I',
-    department: 'Office of the Municipal Treasurer'
-  });
-  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
-  const [isSavingProfile, setIsSavingProfile] = useState(false);
-
   const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'administrator';
-
-  useEffect(() => {
-    const loadProfile = async () => {
-      setIsLoadingProfile(true);
-      try {
-        const profile = await getCollectorSignatoryProfile();
-        if (!profile.accountableName && user?.name) {
-          profile.accountableName = user.name;
-        }
-        setCollectorProfile(profile);
-      } catch (err) {
-        console.error('Failed to load collector signatory profile:', err);
-      } finally {
-        setIsLoadingProfile(false);
-      }
-    };
-    loadProfile();
-  }, [user]);
-
-  const handleSaveCollectorProfile = async () => {
-    if (!collectorProfile.accountableName.trim()) {
-      setNotification({ open: true, message: 'Please enter an Accountable Officer name.', severity: 'warning' });
-      return;
-    }
-
-    setIsSavingProfile(true);
-    try {
-      const success = await saveCollectorSignatoryProfile(collectorProfile);
-      if (success) {
-        setNotification({ 
-          open: true, 
-          message: 'Accountable Name updated! It will now display in Section D (Certification) on all your reports.', 
-          severity: 'success' 
-        });
-      } else {
-        setNotification({ open: true, message: 'Failed to update Accountable Name.', severity: 'error' });
-      }
-    } catch (err) {
-      console.error('Error saving signatory profile:', err);
-      setNotification({ open: true, message: 'Error saving Accountable Name.', severity: 'error' });
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
 
   const handleExportData = () => {
     const data = localStorage.getItem('rcd_reports');
@@ -134,7 +70,7 @@ export const SettingsPage: React.FC = () => {
           Settings & Preferences
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Manage your account profile, designated certification signatory name, and system preferences.
+          Manage your account profile, preferences, and data storage.
         </Typography>
       </Box>
 
@@ -170,104 +106,6 @@ export const SettingsPage: React.FC = () => {
           </Box>
           <Typography variant="body2" color="text.secondary">{user?.email || 'user@example.com'}</Typography>
         </Box>
-      </Paper>
-
-      {/* Accountable Officer / Certification Signatory Card */}
-      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 1.5, border: '1px solid #e2e8f0', bgcolor: '#ffffff' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2.5, flexWrap: 'wrap', gap: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Box sx={{ p: 1, bgcolor: '#e0f2fe', color: '#0284c7', borderRadius: 1, display: 'flex' }}>
-              <Badge />
-            </Box>
-            <Box>
-              <Typography variant="subtitle1" fontWeight="800" sx={{ color: '#0f172a' }}>
-                Accountable Officer & Report Certification
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Configure your official name and designation for Section D (Certification) on all your generated collection reports.
-              </Typography>
-            </Box>
-          </Box>
-          <Chip 
-            icon={<CheckCircle sx={{ fontSize: 16 }} />}
-            label="Section D Signatory" 
-            size="small" 
-            sx={{ bgcolor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontWeight: 700 }} 
-          />
-        </Box>
-
-        {isLoadingProfile ? (
-          <Box sx={{ py: 3, display: 'flex', justifyContent: 'center' }}>
-            <CircularProgress size={24} />
-          </Box>
-        ) : (
-          <>
-            <Grid container spacing={2.5}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <TextField
-                  label="Accountable Officer Name"
-                  placeholder="e.g. MENARD A. HERRERA"
-                  fullWidth
-                  size="small"
-                  value={collectorProfile.accountableName}
-                  onChange={(e) => setCollectorProfile({ ...collectorProfile, accountableName: e.target.value })}
-                  helperText="Full name printed in Section D Certification line"
-                  required
-                />
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <TextField
-                  label="Official Designation / Position"
-                  placeholder="e.g. Revenue Collection Clerk I"
-                  fullWidth
-                  size="small"
-                  value={collectorProfile.position}
-                  onChange={(e) => setCollectorProfile({ ...collectorProfile, position: e.target.value })}
-                  helperText="Official title below your certification signature"
-                  required
-                />
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <TextField
-                  label="Department / Office"
-                  placeholder="e.g. Office of the Municipal Treasurer"
-                  fullWidth
-                  size="small"
-                  value={collectorProfile.department}
-                  onChange={(e) => setCollectorProfile({ ...collectorProfile, department: e.target.value })}
-                  helperText="Designated office or municipal division"
-                  required
-                />
-              </Grid>
-            </Grid>
-
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3 }}>
-              <Tooltip title="Save Accountable Name to Signatories Database" arrow>
-                <IconButton
-                  onClick={handleSaveCollectorProfile}
-                  disabled={isSavingProfile || !collectorProfile.accountableName.trim()}
-                  sx={{
-                    bgcolor: '#0284c7',
-                    color: '#ffffff',
-                    borderRadius: 1,
-                    px: 2.5,
-                    py: 1,
-                    fontSize: '0.875rem',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    '&:hover': { bgcolor: '#0369a1', color: '#ffffff' }
-                  }}
-                >
-                  <Save fontSize="small" />
-                  <Typography variant="button" sx={{ color: '#fff', fontWeight: 700, textTransform: 'none' }}>
-                    {isSavingProfile ? 'Saving...' : 'Save Accountable Name'}
-                  </Typography>
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </>
-        )}
       </Paper>
 
       {/* Preferences Section */}
