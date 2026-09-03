@@ -73,3 +73,21 @@ export interface RPTCollectionItem {
   userId?: string;
 }
 
+export interface CommunityTaxItem {
+  id: number;
+  afNo: string;           // "AF 0016" or "0016"
+  ctcNo: string;          // CTC Certificate / OR Number
+  taxpayerName: string;   // Full name of Individual or Corporate entity
+  ctcType: 'Individual' | 'Corporation';
+  barangay: string;
+  address?: string;
+  basicTax: number;       // ₱5.00 (Individual) or ₱500.00 (Corporation)
+  additionalTax: number;  // Gross receipts / property / earnings
+  penalty?: number;       // Delinquency penalty / surcharge
+  amount: number;         // Total = basic + additional + penalty
+  date: string;           // Date of Issue (YYYY-MM-DD)
+  remarks?: string;
+  collectorEmail?: string;
+  userId?: string;
+}
+

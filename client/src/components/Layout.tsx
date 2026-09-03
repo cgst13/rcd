@@ -33,7 +33,8 @@ import {
   SupervisorAccount,
   AdminPanelSettings,
   Summarize,
-  AccountBalanceWallet
+  AccountBalanceWallet,
+  Badge
 } from '@mui/icons-material';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
@@ -239,6 +240,38 @@ export const Layout: React.FC = () => {
                   primary="RPT Collection" 
                   secondary="AF 56 Real Property"
                   primaryTypographyProps={{ fontWeight: isRouteActive('/rpt-collection') ? 700 : 500, fontSize: '0.88rem' }} 
+                  secondaryTypographyProps={{ fontSize: '0.70rem' }}
+                />
+              )}
+            </ListItemButton>
+          </Tooltip>
+        </ListItem>
+
+        {/* 3b. Community Tax (AF 0016) */}
+        <ListItem disablePadding sx={{ mb: 0.5 }}>
+          <Tooltip title={isCollapsed ? 'Community Tax (AF 0016)' : ''} placement="right" arrow>
+            <ListItemButton
+              selected={isRouteActive('/community-tax')}
+              onClick={() => { navigate('/community-tax'); setMobileOpen(false); }}
+              sx={{
+                borderRadius: 1,
+                py: 0.8,
+                px: isCollapsed ? 1.2 : 1.5,
+                justifyContent: isCollapsed ? 'center' : 'flex-start',
+                color: isRouteActive('/community-tax') ? '#0284c7' : '#475569',
+                bgcolor: isRouteActive('/community-tax') ? '#f0f9ff' : 'transparent',
+                border: isRouteActive('/community-tax') ? '1px solid #bae6fd' : '1px solid transparent',
+                '&:hover': { bgcolor: '#f0f9ff', color: '#0284c7' }
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: isCollapsed ? 0 : 36, color: isRouteActive('/community-tax') ? '#0284c7' : '#64748b', justifyContent: 'center' }}>
+                <Badge />
+              </ListItemIcon>
+              {!isCollapsed && (
+                <ListItemText 
+                  primary="Community Tax" 
+                  secondary="AF 0016 Cedula"
+                  primaryTypographyProps={{ fontWeight: isRouteActive('/community-tax') ? 700 : 500, fontSize: '0.88rem' }} 
                   secondaryTypographyProps={{ fontSize: '0.70rem' }}
                 />
               )}

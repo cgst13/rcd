@@ -9,6 +9,7 @@ import { AccountCodesPage } from './pages/AccountCodesPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SignatoriesPage } from './pages/SignatoriesPage';
 import { RPTCollectionPage } from './pages/RPTCollectionPage';
+import { CommunityTaxPage } from './pages/CommunityTaxPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { UsersPage } from './pages/UsersPage';
 import { AdminReportsPage } from './pages/AdminReportsPage';
@@ -112,6 +113,7 @@ function AppRoutes() {
         } />
         <Route path="/signatories" element={<SignatoriesPage />} />
         <Route path="/rpt-collection" element={<RPTCollectionPage />} />
+        <Route path="/community-tax" element={<CommunityTaxPage />} />
         <Route path="/users" element={
           <AdminRoute>
             <UsersPage />

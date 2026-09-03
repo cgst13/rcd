@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
-import type { RCDReport, AccountCode, Signatory, RPTCollectionItem } from '../types/rcd';
+import type { RCDReport, AccountCode, Signatory, RPTCollectionItem, CommunityTaxItem } from '../types/rcd';
 
 export interface UserProfile {
   id: string;
@@ -1605,6 +1605,262 @@ export const deleteRPTCollectionGroup = async (ids: number[], af56Id?: string, o
   }
 
   return true;
+};
+
+// ============================================================================
+// 5b. COMMUNITY TAX CERTIFICATE (AF 0016 / Cedula)
+// ============================================================================
+
+export const getCommunityTaxCollections = async (): Promise<CommunityTaxItem[]> => {
+  const user = getCurrentLocalUser();
+  const isAdmin = isCurrentUserAdmin();
+  const userEmail = user?.email?.toLowerCase().trim();
+
+  let remoteItems: CommunityTaxItem[] = [];
+
+  if (isSupabaseConfigured()) {
+    try {
+      let data = await fetchAllRows(async (from, to) => {
+        let query = supabase
+          .from('rcd_community_tax_collections')
+          .select('*')
+          .order('date', { ascending: false })
+          .order('ctc_no', { ascending: false });
+
+        if (!isAdmin) {
+          const filterParts: string[] = [];
+          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
+          if (filterParts.length > 0) {
+            query = query.or(filterParts.join(','));
+          }
+        }
+
+        return await query.range(from, to);
+      });
+
+      if (data) {
+        if (!isAdmin && user) {
+          data = data.filter((row: any) => {
+            const rowEmail = row.collector_email?.toLowerCase().trim();
+            const rowUserId = row.user_id;
+            if (rowEmail && userEmail) return rowEmail === userEmail;
+            if (rowUserId && user.id) return rowUserId === user.id;
+            return false;
+          });
+        }
+
+        remoteItems = data.map((row: any) => ({
+          id: row.id,
+          afNo: row.af_no || 'AF 0016',
+          ctcNo: row.ctc_no || row.or_number || '',
+          taxpayerName: row.taxpayer_name || row.payor || '',
+          ctcType: row.ctc_type === 'Corporation' ? 'Corporation' : 'Individual',
+          barangay: row.barangay || '',
+          address: row.address || '',
+          basicTax: parseFloat(row.basic_tax ?? (row.ctc_type === 'Corporation' ? 500 : 5)),
+          additionalTax: parseFloat(row.additional_tax ?? 0),
+          penalty: parseFloat(row.penalty ?? 0),
+          amount: parseFloat(row.amount ?? 0),
+          date: row.date || '',
+          remarks: row.remarks || '',
+          collectorEmail: row.collector_email || undefined,
+          userId: row.user_id || undefined,
+        }));
+
+        try {
+          localStorage.setItem('community_tax_collections', JSON.stringify(remoteItems));
+        } catch {}
+
+        return remoteItems;
+      }
+    } catch (e) {
+      console.warn('Error fetching Community Tax from Supabase:', e);
+    }
+  }
+
+  // Fallback to local storage
+  const stored = localStorage.getItem('community_tax_collections');
+  if (stored) {
+    try {
+      const localList: CommunityTaxItem[] = JSON.parse(stored);
+      return (!isAdmin && user)
+        ? localList.filter(item => {
+            const itemEmail = item.collectorEmail?.toLowerCase().trim();
+            const itemUserId = item.userId;
+            if (itemEmail && userEmail) return itemEmail === userEmail;
+            if (itemUserId && user.id) return itemUserId === user.id;
+            return false;
+          })
+        : localList;
+    } catch {}
+  }
+
+  return [];
+};
+
+export const saveCommunityTaxCollection = async (item: CommunityTaxItem): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
+  if (isSupabaseConfigured()) {
+    try {
+      if (item.id && item.id > 0) {
+        const { error } = await supabase
+          .from('rcd_community_tax_collections')
+          .upsert({
+            id: item.id,
+            user_id: userId,
+            collector_email: collectorEmail,
+            af_no: item.afNo || 'AF 0016',
+            ctc_no: item.ctcNo,
+            taxpayer_name: item.taxpayerName,
+            ctc_type: item.ctcType,
+            barangay: item.barangay,
+            address: item.address || '',
+            basic_tax: item.basicTax,
+            additional_tax: item.additionalTax,
+            penalty: item.penalty || 0,
+            amount: item.amount,
+            date: item.date,
+            remarks: item.remarks || '',
+          });
+        if (!error) return true;
+      } else {
+        const { error } = await supabase
+          .from('rcd_community_tax_collections')
+          .insert({
+            user_id: userId,
+            collector_email: collectorEmail,
+            af_no: item.afNo || 'AF 0016',
+            ctc_no: item.ctcNo,
+            taxpayer_name: item.taxpayerName,
+            ctc_type: item.ctcType,
+            barangay: item.barangay,
+            address: item.address || '',
+            basic_tax: item.basicTax,
+            additional_tax: item.additionalTax,
+            penalty: item.penalty || 0,
+            amount: item.amount,
+            date: item.date,
+            remarks: item.remarks || '',
+          });
+        if (!error) return true;
+      }
+    } catch (e) {
+      console.error('Error saving Community Tax to Supabase:', e);
+    }
+  }
+
+  // Fallback to local storage
+  const current = JSON.parse(localStorage.getItem('community_tax_collections') || '[]');
+  const index = current.findIndex((c: any) => c.id === item.id);
+  let updated;
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = { ...item, collectorEmail, userId };
+  } else {
+    const nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
+    updated = [{ ...item, id: item.id || nextId, collectorEmail, userId }, ...current];
+  }
+  localStorage.setItem('community_tax_collections', JSON.stringify(updated));
+  return true;
+};
+
+export const deleteCommunityTaxCollection = async (id: number): Promise<boolean> => {
+  if (isSupabaseConfigured()) {
+    try {
+      const { error } = await supabase
+        .from('rcd_community_tax_collections')
+        .delete()
+        .eq('id', id);
+      if (error) console.error('Error deleting Community Tax from Supabase:', error);
+    } catch (e) {
+      console.error('Error deleting Community Tax from Supabase:', e);
+    }
+  }
+
+  try {
+    const stored = localStorage.getItem('community_tax_collections');
+    if (stored) {
+      const current: CommunityTaxItem[] = JSON.parse(stored);
+      const filtered = current.filter(c => c.id !== id);
+      localStorage.setItem('community_tax_collections', JSON.stringify(filtered));
+    }
+  } catch (err) {
+    console.error('Error updating local storage after Community Tax delete:', err);
+  }
+
+  return true;
+};
+
+export const importCommunityTaxBatch = async (
+  entries: Array<Omit<CommunityTaxItem, 'id'>>
+): Promise<{ success: boolean; count: number }> => {
+  if (entries.length === 0) return { success: true, count: 0 };
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const rows = entries.map(e => ({
+        user_id: userId,
+        collector_email: collectorEmail,
+        af_no: e.afNo || 'AF 0016',
+        ctc_no: e.ctcNo || '',
+        taxpayer_name: e.taxpayerName || '',
+        ctc_type: e.ctcType || 'Individual',
+        barangay: e.barangay || '',
+        address: e.address || '',
+        basic_tax: Number(e.basicTax) || 0,
+        additional_tax: Number(e.additionalTax) || 0,
+        penalty: Number(e.penalty) || 0,
+        amount: Number(e.amount) || 0,
+        date: e.date || new Date().toISOString().split('T')[0],
+        remarks: e.remarks || '',
+      }));
+
+      const chunkSize = 500;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize);
+        await supabase.from('rcd_community_tax_collections').insert(chunk);
+      }
+
+      return { success: true, count: entries.length };
+    } catch (e) {
+      console.error('Error importing Community Tax to Supabase:', e);
+    }
+  }
+
+  try {
+    const current = JSON.parse(localStorage.getItem('community_tax_collections') || '[]');
+    let nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
+    const newItems: CommunityTaxItem[] = entries.map(e => ({
+      id: nextId++,
+      afNo: e.afNo || 'AF 0016',
+      ctcNo: e.ctcNo || '',
+      taxpayerName: e.taxpayerName || '',
+      ctcType: e.ctcType || 'Individual',
+      barangay: e.barangay || '',
+      address: e.address || '',
+      basicTax: Number(e.basicTax) || (e.ctcType === 'Corporation' ? 500 : 5),
+      additionalTax: Number(e.additionalTax) || 0,
+      penalty: Number(e.penalty) || 0,
+      amount: Number(e.amount) || 0,
+      date: e.date || new Date().toISOString().split('T')[0],
+      remarks: e.remarks || '',
+      collectorEmail,
+      userId,
+    }));
+
+    localStorage.setItem('community_tax_collections', JSON.stringify([...newItems, ...current]));
+    return { success: true, count: entries.length };
+  } catch (err) {
+    console.error('Failed to import Community Tax to localStorage', err);
+    return { success: false, count: 0 };
+  }
 };
 
 // ============================================================================

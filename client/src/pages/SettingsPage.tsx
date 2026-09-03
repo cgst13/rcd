@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   Box, 
   Typography, 
@@ -36,12 +37,17 @@ import { Notification } from '../components/Notification';
 import { 
   getCollectorSignatoryProfile, 
   saveCollectorSignatoryProfile, 
+  getCollectionEntries,
+  getRPTCollections,
+  getCommunityTaxCollections,
+  getCurrentLocalUser,
   type CollectorSignatoryProfile 
 } from '../services/supabaseService';
 
 export const SettingsPage: React.FC = () => {
   const { user } = useAuth();
   const [openClearDialog, setOpenClearDialog] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [notification, setNotification] = useState<{
     open: boolean;
     message: string;
@@ -103,22 +109,170 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleExportData = () => {
-    const data = localStorage.getItem('rcd_reports');
-    if (!data) {
-      setNotification({ open: true, message: 'No local reports data to export.', severity: 'warning' });
-      return;
+  const handleExportData = async () => {
+    setIsExporting(true);
+    try {
+      const [allCollections, allRPTCollections, allCommunityTaxCollections] = await Promise.all([
+        getCollectionEntries(),
+        getRPTCollections(),
+        getCommunityTaxCollections()
+      ]);
+
+      const activeUser = user || getCurrentLocalUser();
+      const userEmail = activeUser?.email?.toLowerCase().trim();
+      const userId = activeUser?.id;
+
+      // Filter collections strictly to own user records only
+      const isUserItem = (item: { collectorEmail?: string; userId?: string }) => {
+        const itemEmail = item.collectorEmail?.toLowerCase().trim();
+        const itemUserId = item.userId;
+
+        if (itemEmail && userEmail) {
+          return itemEmail === userEmail;
+        }
+        if (itemUserId && userId) {
+          return itemUserId === userId;
+        }
+        if (!itemEmail && !itemUserId) {
+          return true;
+        }
+        return false;
+      };
+
+      const collections = (allCollections || []).filter(isUserItem);
+      const rptCollections = (allRPTCollections || []).filter(isUserItem);
+      const communityTax = (allCommunityTaxCollections || []).filter(isUserItem);
+
+      if (collections.length === 0 && rptCollections.length === 0 && communityTax.length === 0) {
+        setNotification({ 
+          open: true, 
+          message: 'No collection data found for your user account to export.', 
+          severity: 'warning' 
+        });
+        return;
+      }
+
+      // Format Sheet 1: Collections (Accountable Form 51)
+      const formattedCollections = collections.map(item => ({
+        'Date': item.date || '',
+        'AF No.': item.afNo || '',
+        'OR No.': item.orNo || '',
+        'Payor Name': item.payor || '',
+        'Main Category': item.mainCategory || '',
+        'Sub Category / Particulars': item.subCategory || '',
+        'Account Code': item.accountCode || '',
+        'Amount (PHP)': Number(item.amount || 0),
+        'Remarks': item.remarks || '',
+        'Collector Email': item.collectorEmail || userEmail || ''
+      }));
+
+      // Format Sheet 2: RPT Collections (Accountable Form 56)
+      const formattedRPTCollections = rptCollections.map(item => ({
+        'Date': item.date || '',
+        'AF 56 No.': item.af56Id || '',
+        'OR No.': item.orNumber || '',
+        'Taxpayer / Payor': item.payor || '',
+        'Barangay': item.barangay || '',
+        'Declared Owner / Land Name': item.landName || '',
+        'TD Number': item.tdNumber || '',
+        'Period / Years Paid': item.yearsPaid || '',
+        'Amount (PHP)': Number(item.amount || 0),
+        'Remarks': item.remarks || '',
+        'Collector Email': item.collectorEmail || userEmail || ''
+      }));
+
+      // Format Sheet 3: Community Tax (Accountable Form 0016)
+      const formattedCommunityTax = communityTax.map(item => ({
+        'Date': item.date || '',
+        'Form No.': item.afNo || 'AF 0016',
+        'CTC No.': item.ctcNo || '',
+        'Taxpayer Name': item.taxpayerName || '',
+        'Classification': item.ctcType || 'Individual',
+        'Barangay': item.barangay || '',
+        'Address': item.address || '',
+        'Basic Tax (PHP)': Number(item.basicTax || 0),
+        'Additional Tax (PHP)': Number(item.additionalTax || 0),
+        'Penalty (PHP)': Number(item.penalty || 0),
+        'Total Amount (PHP)': Number(item.amount || 0),
+        'Remarks': item.remarks || '',
+        'Collector Email': item.collectorEmail || userEmail || ''
+      }));
+
+      const wb = XLSX.utils.book_new();
+
+      // Add Collections Worksheet
+      const wsCollections = XLSX.utils.json_to_sheet(formattedCollections);
+      wsCollections['!cols'] = [
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 25 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 15 },
+        { wch: 14 },
+        { wch: 25 },
+        { wch: 25 }
+      ];
+      XLSX.utils.book_append_sheet(wb, wsCollections, 'Collections');
+
+      // Add RPT Collections Worksheet
+      const wsRPT = XLSX.utils.json_to_sheet(formattedRPTCollections);
+      wsRPT['!cols'] = [
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 25 },
+        { wch: 18 },
+        { wch: 25 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 25 },
+        { wch: 25 }
+      ];
+      XLSX.utils.book_append_sheet(wb, wsRPT, 'RPT Collections');
+
+      // Add Community Tax Worksheet
+      const wsCTC = XLSX.utils.json_to_sheet(formattedCommunityTax);
+      wsCTC['!cols'] = [
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 25 },
+        { wch: 25 }
+      ];
+      XLSX.utils.book_append_sheet(wb, wsCTC, 'Community Tax');
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      const sanitizedName = (activeUser?.name || 'User').trim().replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `User_Backup_${sanitizedName}_${dateStr}.xlsx`;
+
+      XLSX.writeFile(wb, filename);
+
+      setNotification({
+        open: true,
+        message: `Exported ${collections.length} Collections, ${rptCollections.length} RPT Collections, and ${communityTax.length} Community Tax records for your user account successfully!`,
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Failed to export local backup:', err);
+      setNotification({
+        open: true,
+        message: 'Error exporting collection backup. Please try again.',
+        severity: 'error'
+      });
+    } finally {
+      setIsExporting(false);
     }
-    
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rcd_backup_${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setNotification({ open: true, message: 'Data exported successfully.', severity: 'success' });
   };
 
   const handleClearData = () => {
@@ -326,16 +480,18 @@ export const SettingsPage: React.FC = () => {
         </Box>
         <List sx={{ py: 0 }}>
           <ListItem disablePadding>
-            <ListItemButton onClick={handleExportData} sx={{ py: 1.5 }}>
-              <ListItemIcon sx={{ color: '#0284c7' }}><CloudDownload /></ListItemIcon>
+            <ListItemButton onClick={handleExportData} disabled={isExporting} sx={{ py: 1.5 }}>
+              <ListItemIcon sx={{ color: '#0284c7' }}>
+                {isExporting ? <CircularProgress size={24} sx={{ color: '#0284c7' }} /> : <CloudDownload />}
+              </ListItemIcon>
               <ListItemText 
                 primary="Export Local Backup" 
-                secondary="Download a JSON backup of locally cached reports" 
+                secondary="Download Excel (.xlsx) file with separate sheets for Collections, RPT Collections, and Community Tax" 
                 primaryTypographyProps={{ fontWeight: 600 }}
               />
-              <Tooltip title="Export JSON" arrow>
-                <IconButton size="small" color="primary" sx={{ borderRadius: 1 }}>
-                  <CloudDownload fontSize="small" />
+              <Tooltip title="Export Excel Backup (.xlsx)" arrow>
+                <IconButton size="small" color="primary" disabled={isExporting} sx={{ borderRadius: 1 }}>
+                  {isExporting ? <CircularProgress size={20} color="inherit" /> : <CloudDownload fontSize="small" />}
                 </IconButton>
               </Tooltip>
             </ListItemButton>
