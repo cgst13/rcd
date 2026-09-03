@@ -12,6 +12,7 @@ import { RPTCollectionPage } from './pages/RPTCollectionPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { UsersPage } from './pages/UsersPage';
 import { AdminReportsPage } from './pages/AdminReportsPage';
+import { DepositsPage } from './pages/DepositsPage';
 import { Layout } from './components/Layout';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/useAuth';
@@ -102,6 +103,11 @@ function AppRoutes() {
         <Route path="/admin-reports" element={
           <AdminRoute>
             <AdminReportsPage />
+          </AdminRoute>
+        } />
+        <Route path="/deposits" element={
+          <AdminRoute>
+            <DepositsPage />
           </AdminRoute>
         } />
         <Route path="/signatories" element={<SignatoriesPage />} />

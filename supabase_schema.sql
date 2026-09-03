@@ -277,3 +277,34 @@ insert into public.rcd_signatories (user_id, full_name, position, department, re
   (null, 'LEON F. PAZ, JR.', 'Municipal Accountant', 'Office of the Municipal Accountant', 'Municipal Accountant / Certified Correct'),
   (null, 'HESTHER F. FANOGA', 'AA II', 'Office of the Municipal Accountant', 'Accounting Staff / Prepared by')
 on conflict do nothing;
+
+-- ================================================================
+-- 9. BANK DEPOSITS TABLE (rcd_bank_deposits)
+-- ================================================================
+create table if not exists public.rcd_bank_deposits (
+  id uuid default gen_random_uuid() primary key,
+  deposit_date date not null default current_date,
+  deposit_control_number text not null,
+  amount numeric(14, 2) not null default 0,
+  depositor_name text not null,
+  is_reported boolean default false,
+  report_id text null,
+  user_id uuid null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- Ensure columns exist if table was already created
+alter table public.rcd_bank_deposits add column if not exists deposit_control_number text;
+alter table public.rcd_bank_deposits add column if not exists depositor_name text;
+alter table public.rcd_bank_deposits add column if not exists is_reported boolean default false;
+alter table public.rcd_bank_deposits add column if not exists report_id text;
+
+create index if not exists idx_rcd_bank_deposits_date on public.rcd_bank_deposits(deposit_date);
+create index if not exists idx_rcd_bank_deposits_control_no on public.rcd_bank_deposits(deposit_control_number);
+
+alter table public.rcd_bank_deposits disable row level security;
+grant all on table public.rcd_bank_deposits to anon, authenticated, service_role;
+drop policy if exists "open_access_bank_deposits" on public.rcd_bank_deposits;
+create policy "open_access_bank_deposits" on public.rcd_bank_deposits for all to public using (true) with check (true);
+

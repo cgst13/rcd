@@ -1994,6 +1994,11 @@ export interface AdminSubmittedReportRecord {
   dateFrom: string;
   dateTo: string;
   notes?: string;
+  stagedRows?: any[];
+  beginningBalance?: number;
+  endingBalance?: number;
+  selectedDepositIds?: string[];
+  selectedDeposits?: any[];
 }
 
 export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRecord[]> => {
@@ -2079,7 +2084,12 @@ export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRe
             submittedBy: isStructured && colData.submittedBy ? colData.submittedBy : 'Administrator',
             status: r.status || 'Submitted',
             dateFrom: isStructured && colData.dateFrom ? colData.dateFrom : (r.date || ''),
-            dateTo: isStructured && colData.dateTo ? colData.dateTo : (r.date || '')
+            dateTo: isStructured && colData.dateTo ? colData.dateTo : (r.date || ''),
+            stagedRows: isStructured && Array.isArray(colData.stagedRows) ? colData.stagedRows : undefined,
+            beginningBalance: isStructured && typeof colData.beginningBalance === 'number' ? colData.beginningBalance : undefined,
+            endingBalance: isStructured && typeof colData.endingBalance === 'number' ? colData.endingBalance : undefined,
+            selectedDepositIds: isStructured && Array.isArray(colData.selectedDepositIds) ? colData.selectedDepositIds : undefined,
+            selectedDeposits: isStructured && Array.isArray(colData.selectedDeposits) ? colData.selectedDeposits : (Array.isArray(r.deposits) && r.deposits.length > 0 ? r.deposits : undefined)
           };
         });
 
@@ -2105,7 +2115,8 @@ export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRe
               orRange: l.orRange || remote.orRange,
               orNumbers: l.orNumbers?.length ? l.orNumbers : remote.orNumbers,
               orCount: l.orCount || remote.orCount,
-              subCategorySummary: l.subCategorySummary?.length ? l.subCategorySummary : remote.subCategorySummary
+              subCategorySummary: l.subCategorySummary?.length ? l.subCategorySummary : remote.subCategorySummary,
+              stagedRows: l.stagedRows || remote.stagedRows
             });
           } else {
             mergedMap.set(key, l);
@@ -2132,6 +2143,21 @@ export const getSubmittedItemIds = async (): Promise<Set<string>> => {
   // 2. Check submitted reports
   const submittedReports = await getAdminSubmittedReports();
   submittedReports.forEach(report => {
+    if (report.stagedRows && Array.isArray(report.stagedRows)) {
+      report.stagedRows.forEach((sr: any) => {
+        const cType = sr.collectionType || report.collectionType;
+        (sr.itemIds || []).forEach((id: number) => submittedSet.add(`${cType}_${id}`));
+        (sr.orNumbers || []).forEach((or: string) => {
+          if (or) {
+            if (sr.bookletNo) submittedSet.add(`or_${sr.bookletNo}_${or}`);
+            submittedSet.add(`or_${report.afNo}_${or}`);
+            if (cType === 'rpt' || report.collectionType === 'rpt') {
+              submittedSet.add(`or_A.F. NO. 56_${or}`);
+            }
+          }
+        });
+      });
+    }
     report.itemIds.forEach(id => {
       submittedSet.add(`${report.collectionType}_${id}`);
     });
@@ -2165,6 +2191,21 @@ export const saveAdminSubmittedReport = async (
   record.orNumbers.forEach(or => {
     if (or) newKeys.add(`or_${record.afNo}_${or}`);
   });
+  if (record.stagedRows && Array.isArray(record.stagedRows)) {
+    record.stagedRows.forEach((sr: any) => {
+      const cType = sr.collectionType || record.collectionType;
+      (sr.itemIds || []).forEach((id: number) => newKeys.add(`${cType}_${id}`));
+      (sr.orNumbers || []).forEach((or: string) => {
+        if (or) {
+          if (sr.bookletNo) newKeys.add(`or_${sr.bookletNo}_${or}`);
+          newKeys.add(`or_${record.afNo}_${or}`);
+          if (cType === 'rpt' || record.collectionType === 'rpt') {
+            newKeys.add(`or_A.F. NO. 56_${or}`);
+          }
+        }
+      });
+    });
+  }
   localStorage.setItem('rcd_submitted_item_keys', JSON.stringify(Array.from(newKeys)));
 
   // 3. Sync to Supabase rcd_reports table
@@ -2182,8 +2223,16 @@ export const saveAdminSubmittedReport = async (
         collectionType: record.collectionType,
         dateFrom: record.dateFrom,
         dateTo: record.dateTo,
-        submittedBy: record.submittedBy
+        submittedBy: record.submittedBy,
+        stagedRows: record.stagedRows || [],
+        beginningBalance: record.beginningBalance ?? 0,
+        endingBalance: record.endingBalance ?? 0,
+        selectedDepositIds: record.selectedDepositIds || [],
+        selectedDeposits: record.selectedDeposits || []
       };
+
+      const depositsList = record.selectedDeposits || [];
+      const totalDeposit = depositsList.reduce((sum: number, d: any) => sum + (Number(d.amount) || 0), 0);
 
       await supabase
         .from('rcd_reports')
@@ -2196,22 +2245,36 @@ export const saveAdminSubmittedReport = async (
           fund_type: fundType,
           collections: reportPayload,
           total_collection: record.totalAmount,
-          deposits: [],
-          total_deposit: 0,
+          deposits: depositsList,
+          total_deposit: totalDeposit,
           status: 'Submitted'
         });
 
+      if (record.selectedDepositIds && record.selectedDepositIds.length > 0) {
+        await markBankDepositsAsReported(record.selectedDepositIds, record.reportNumber);
+      }
+
       // Try updating status column in rcd_collections / rcd_rpt_collections if exists
-      const table = record.collectionType === 'rpt' ? 'rcd_rpt_collections' : 'rcd_collections';
-      try {
-        await supabase
-          .from(table)
-          .update({ status: 'Submitted' })
-          .in('id', record.itemIds);
-      } catch {}
+      const idList = Array.from(new Set([
+        ...record.itemIds,
+        ...(record.stagedRows || []).flatMap((sr: any) => sr.itemIds || [])
+      ]));
+      if (idList.length > 0) {
+        try {
+          await supabase.from('rcd_collections').update({ status: 'Submitted' }).in('id', idList);
+        } catch {}
+        try {
+          await supabase.from('rcd_rpt_collections').update({ status: 'Submitted' }).in('id', idList);
+        } catch {}
+      }
     } catch (e) {
       console.warn('Error saving submitted report to Supabase:', e);
     }
+  }
+
+  // Also mark bank deposits locally if selected
+  if (record.selectedDepositIds && record.selectedDepositIds.length > 0) {
+    await markBankDepositsAsReported(record.selectedDepositIds, record.reportNumber);
   }
 
   return true;
@@ -2234,9 +2297,32 @@ export const unmarkAdminSubmittedReport = async (
   const updated = current.filter(r => r.id !== reportId && (!targetReportNumber || r.reportNumber !== targetReportNumber));
   localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updated));
 
+  // 1.b Unmark bank deposits linked to this report
+  await unmarkBankDeposits(reportId);
+  if (targetReportNumber) {
+    await unmarkBankDeposits(targetReportNumber);
+  }
+
   // 2. Remove from submitted item keys
   const currentKeys: string[] = JSON.parse(localStorage.getItem('rcd_submitted_item_keys') || '[]');
   const keysToRemove = new Set<string>();
+
+  if (targetReport?.stagedRows && Array.isArray(targetReport.stagedRows)) {
+    targetReport.stagedRows.forEach((sr: any) => {
+      const cType = sr.collectionType || collectionType;
+      (sr.itemIds || []).forEach((id: number) => keysToRemove.add(`${cType}_${id}`));
+      (sr.orNumbers || []).forEach((or: string) => {
+        if (or) {
+          if (sr.bookletNo) keysToRemove.add(`or_${sr.bookletNo}_${or}`);
+          keysToRemove.add(`or_${afNo}_${or}`);
+          if (cType === 'rpt' || collectionType === 'rpt') {
+            keysToRemove.add(`or_A.F. NO. 56_${or}`);
+          }
+        }
+      });
+    });
+  }
+
   itemIds.forEach(id => keysToRemove.add(`${collectionType}_${id}`));
   if (orNumbers && afNo) {
     orNumbers.forEach(or => keysToRemove.add(`or_${afNo}_${or}`));
@@ -2259,13 +2345,23 @@ export const unmarkAdminSubmittedReport = async (
           .eq('report_number', targetReportNumber);
       }
 
-      const table = collectionType === 'rpt' ? 'rcd_rpt_collections' : 'rcd_collections';
-      try {
-        await supabase
-          .from(table)
-          .update({ status: 'Pending' })
-          .in('id', itemIds);
-      } catch {}
+      // Collect all item IDs to restore to Pending
+      const allItemIds = new Set(itemIds);
+      if (targetReport?.stagedRows && Array.isArray(targetReport.stagedRows)) {
+        targetReport.stagedRows.forEach((sr: any) => {
+          (sr.itemIds || []).forEach((id: number) => allItemIds.add(id));
+        });
+      }
+
+      const idList = Array.from(allItemIds);
+      if (idList.length > 0) {
+        try {
+          await supabase.from('rcd_collections').update({ status: 'Pending' }).in('id', idList);
+        } catch {}
+        try {
+          await supabase.from('rcd_rpt_collections').update({ status: 'Pending' }).in('id', idList);
+        } catch {}
+      }
     } catch (e) {
       console.warn('Error unmarking report in Supabase:', e);
     }
@@ -2273,5 +2369,249 @@ export const unmarkAdminSubmittedReport = async (
 
   return true;
 };
+
+// ============================================================================
+// BANK DEPOSITS SERVICES (For Admin Deposits Management)
+// Only: Date of Deposit, Deposit Control Number, Amount, Name of Depositor
+// Tracking: isReported, reportId
+// ============================================================================
+
+export interface BankDepositRecord {
+  id: string;
+  depositDate: string; // YYYY-MM-DD
+  depositControlNumber: string;
+  amount: number;
+  depositorName: string;
+  isReported?: boolean;
+  reportId?: string;
+  userId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type BankDepositInput = Omit<BankDepositRecord, 'id' | 'createdAt' | 'updatedAt'> & {
+  id?: string;
+};
+
+export const getBankDeposits = async (): Promise<BankDepositRecord[]> => {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase
+        .from('rcd_bank_deposits')
+        .select('*')
+        .order('deposit_date', { ascending: false });
+
+      if (!error && data) {
+        const records: BankDepositRecord[] = data.map((row: any) => ({
+          id: row.id,
+          depositDate: row.deposit_date,
+          depositControlNumber: row.deposit_control_number || row.reference_number || '',
+          amount: Number(row.amount) || 0,
+          depositorName: row.depositor_name || row.deposited_by || '',
+          isReported: Boolean(row.is_reported),
+          reportId: row.report_id || undefined,
+          userId: row.user_id,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+        try {
+          localStorage.setItem('rcd_bank_deposits', JSON.stringify(records));
+        } catch {}
+        return records;
+      }
+    } catch (e) {
+      console.warn('Error fetching bank deposits from Supabase:', e);
+    }
+  }
+
+  const stored = localStorage.getItem('rcd_bank_deposits');
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      return parsed.map((row: any) => ({
+        id: row.id,
+        depositDate: row.depositDate || row.deposit_date,
+        depositControlNumber: row.depositControlNumber || row.referenceNumber || row.deposit_control_number || '',
+        amount: Number(row.amount) || 0,
+        depositorName: row.depositorName || row.depositedBy || row.depositor_name || '',
+        isReported: Boolean(row.isReported || row.is_reported),
+        reportId: row.reportId || row.report_id || undefined,
+        userId: row.userId || row.user_id,
+        createdAt: row.createdAt || row.created_at,
+        updatedAt: row.updatedAt || row.updated_at,
+      }));
+    } catch {}
+  }
+
+  return [];
+};
+
+export const saveBankDeposit = async (deposit: BankDepositInput): Promise<BankDepositRecord | null> => {
+  const user = getCurrentLocalUser();
+  const userId = user?.id && isValidUuid(user.id) ? user.id : null;
+
+  const payload: any = {
+    deposit_date: deposit.depositDate,
+    deposit_control_number: deposit.depositControlNumber,
+    amount: Number(deposit.amount) || 0,
+    depositor_name: deposit.depositorName || (user?.name ? user.name.toUpperCase() : 'MUNICIPAL TREASURER'),
+    is_reported: deposit.isReported ?? false,
+    report_id: deposit.reportId || null,
+    user_id: userId,
+    updated_at: new Date().toISOString()
+  };
+
+  let savedRecord: BankDepositRecord | null = null;
+
+  if (isSupabaseConfigured()) {
+    try {
+      if (deposit.id) {
+        const { data, error } = await supabase
+          .from('rcd_bank_deposits')
+          .update(payload)
+          .eq('id', deposit.id)
+          .select()
+          .single();
+
+        if (!error && data) {
+          savedRecord = {
+            id: data.id,
+            depositDate: data.deposit_date,
+            depositControlNumber: data.deposit_control_number || data.reference_number || '',
+            amount: Number(data.amount) || 0,
+            depositorName: data.depositor_name || data.deposited_by || '',
+            isReported: Boolean(data.is_reported),
+            reportId: data.report_id || undefined,
+            userId: data.user_id,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at,
+          };
+        }
+      } else {
+        payload.created_at = new Date().toISOString();
+        const { data, error } = await supabase
+          .from('rcd_bank_deposits')
+          .insert(payload)
+          .select()
+          .single();
+
+        if (!error && data) {
+          savedRecord = {
+            id: data.id,
+            depositDate: data.deposit_date,
+            depositControlNumber: data.deposit_control_number || data.reference_number || '',
+            amount: Number(data.amount) || 0,
+            depositorName: data.depositor_name || data.deposited_by || '',
+            isReported: Boolean(data.is_reported),
+            reportId: data.report_id || undefined,
+            userId: data.user_id,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Error saving bank deposit to Supabase, using local fallback:', e);
+    }
+  }
+
+  if (!savedRecord) {
+    const id = deposit.id || `deposit_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    savedRecord = {
+      id,
+      depositDate: deposit.depositDate,
+      depositControlNumber: deposit.depositControlNumber,
+      amount: Number(deposit.amount) || 0,
+      depositorName: deposit.depositorName || (user?.name ? user.name.toUpperCase() : 'MUNICIPAL TREASURER'),
+      isReported: deposit.isReported ?? false,
+      reportId: deposit.reportId || undefined,
+      userId: userId || undefined,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const current = await getBankDeposits();
+  const existingIdx = current.findIndex(d => d.id === savedRecord!.id);
+  let updated: BankDepositRecord[];
+  if (existingIdx >= 0) {
+    updated = [...current];
+    updated[existingIdx] = savedRecord;
+  } else {
+    updated = [savedRecord, ...current];
+  }
+  localStorage.setItem('rcd_bank_deposits', JSON.stringify(updated));
+
+  return savedRecord;
+};
+
+export const markBankDepositsAsReported = async (depositIds: string[], reportId: string): Promise<boolean> => {
+  if (depositIds.length === 0) return true;
+
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase
+        .from('rcd_bank_deposits')
+        .update({ is_reported: true, report_id: reportId })
+        .in('id', depositIds);
+    } catch (e) {
+      console.warn('Error marking bank deposits as reported in Supabase:', e);
+    }
+  }
+
+  const stored = localStorage.getItem('rcd_bank_deposits');
+  if (stored) {
+    try {
+      const parsed: BankDepositRecord[] = JSON.parse(stored);
+      const updated = parsed.map(d => depositIds.includes(d.id) ? { ...d, isReported: true, reportId } : d);
+      localStorage.setItem('rcd_bank_deposits', JSON.stringify(updated));
+    } catch {}
+  }
+  return true;
+};
+
+export const unmarkBankDeposits = async (reportId: string): Promise<boolean> => {
+  if (!reportId) return true;
+
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase
+        .from('rcd_bank_deposits')
+        .update({ is_reported: false, report_id: null })
+        .eq('report_id', reportId);
+    } catch (e) {
+      console.warn('Error unmarking bank deposits in Supabase:', e);
+    }
+  }
+
+  const stored = localStorage.getItem('rcd_bank_deposits');
+  if (stored) {
+    try {
+      const parsed: BankDepositRecord[] = JSON.parse(stored);
+      const updated = parsed.map(d => (d.reportId === reportId || d.reportId === `report_${reportId}`) ? { ...d, isReported: false, reportId: undefined } : d);
+      localStorage.setItem('rcd_bank_deposits', JSON.stringify(updated));
+    } catch {}
+  }
+  return true;
+};
+
+export const deleteBankDeposit = async (id: string): Promise<boolean> => {
+  if (isSupabaseConfigured()) {
+    try {
+      await supabase
+        .from('rcd_bank_deposits')
+        .delete()
+        .eq('id', id);
+    } catch (e) {
+      console.warn('Error deleting bank deposit from Supabase:', e);
+    }
+  }
+
+  const current = await getBankDeposits();
+  const filtered = current.filter(d => d.id !== id);
+  localStorage.setItem('rcd_bank_deposits', JSON.stringify(filtered));
+  return true;
+};
+
 
 
