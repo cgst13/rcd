@@ -330,7 +330,7 @@ export const ReportsPage: React.FC = () => {
     }
 
     if (ctcFilterType !== 'ALL') {
-      result = result.filter(item => item.ctcType === ctcFilterType);
+      result = result.filter(item => (item.gender || 'Male') === ctcFilterType);
     }
 
     if (ctcFilterBarangay) {
@@ -389,7 +389,7 @@ export const ReportsPage: React.FC = () => {
     }
     if (communityTaxCollections.length > 0) {
       const totalCtc = communityTaxCollections.reduce((s, i) => s + (i.amount || 0), 0);
-      summary['A.F. NO. 0016'] = (summary['A.F. NO. 0016'] || 0) + totalCtc;
+      summary['BRF NO. 0016'] = (summary['BRF NO. 0016'] || 0) + totalCtc;
     }
     return Object.entries(summary)
       .map(([afNo, amount]) => ({ afNo, amount }))
@@ -2571,15 +2571,15 @@ export const ReportsPage: React.FC = () => {
     }
 
     const total = data.reduce((s, i) => s + (i.amount || 0), 0);
-    const indTotal = data.filter(i => i.ctcType === 'Individual').reduce((s, i) => s + (i.amount || 0), 0);
-    const corpTotal = data.filter(i => i.ctcType === 'Corporation').reduce((s, i) => s + (i.amount || 0), 0);
+    const maleTotal = data.filter(i => (i.gender || 'Male') === 'Male').reduce((s, i) => s + (i.amount || 0), 0);
+    const femaleTotal = data.filter(i => i.gender === 'Female').reduce((s, i) => s + (i.amount || 0), 0);
 
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       printWindow.document.write(`
         <html>
         <head>
-          <title>Print Community Tax Cover - A.F. NO. 0016</title>
+          <title>Print Community Tax Cover - BRF NO. 0016</title>
           <style>
             @page { size: Letter portrait; margin: 0.5in; }
             body { font-family: Arial, sans-serif; margin: 0; padding: 0; -webkit-print-color-adjust: exact; }
@@ -2596,7 +2596,7 @@ export const ReportsPage: React.FC = () => {
           <div class="container">
             <div class="column">
               <div class="header-box">
-                ACCOUNTABLE FORM NO. 0016<br/>
+                ACCOUNTABLE FORM NO. BRF 0016<br/>
                 <span style="font-size: 14px; color: #000;">COMMUNITY TAX CERTIFICATE (CEDULA)</span>
               </div>
               <div class="label">CTC / CERTIFICATE NO. RANGE</div>
@@ -2606,8 +2606,8 @@ export const ReportsPage: React.FC = () => {
               <div class="value" style="color: #0284c7;">₱ ${total.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
 
               <div class="breakdown">
-                <div class="breakdown-item">INDIVIDUAL: ₱ ${indTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
-                <div class="breakdown-item">CORPORATION: ₱ ${corpTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+                <div class="breakdown-item">MALE: ₱ ${maleTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
+                <div class="breakdown-item">FEMALE: ₱ ${femaleTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</div>
               </div>
             </div>
           </div>
@@ -2703,7 +2703,7 @@ export const ReportsPage: React.FC = () => {
       printWindow.document.write(`
         <html>
         <head>
-          <title>RCD Report - Community Tax (A.F. NO. 0016)</title>
+          <title>RCD Report - Community Tax (BRF NO. 0016)</title>
           <style>
             @page { size: Letter portrait; margin: 8mm 10mm; }
             body { font-family: Arial, sans-serif; font-size: 11px; margin: 0; padding: 0; color: #000; -webkit-print-color-adjust: exact; }
@@ -2730,7 +2730,7 @@ export const ReportsPage: React.FC = () => {
             <div>Province of Romblon</div>
             <div style="font-weight: bold;">MUNICIPALITY OF CONCEPCION</div>
             <div class="report-title">REPORT OF COLLECTIONS AND DEPOSITS</div>
-            <div style="font-size: 10px; font-style: italic;">Accountable Form No. 0016 — Community Tax Certificate</div>
+            <div style="font-size: 10px; font-style: italic;">BRF No. 0016 — Community Tax Certificate</div>
           </div>
 
           <div class="meta-grid">
@@ -2755,7 +2755,7 @@ export const ReportsPage: React.FC = () => {
             <tbody>
               <tr>
                 <td class="text-center">${minCtc || '-'} — ${maxCtc || '-'} (${reportData.length} issued)</td>
-                <td class="text-center">A.F. NO. 0016</td>
+                <td class="text-center">BRF NO. 0016</td>
                 <td class="text-right">₱ ${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
               </tr>
               <tr style="font-weight: bold; background: #fafafa;">
@@ -2800,7 +2800,7 @@ export const ReportsPage: React.FC = () => {
             </thead>
             <tbody>
               <tr>
-                <td>Community Tax (A.F. 0016)</td>
+                <td>Community Tax (BRF 0016)</td>
                 <td class="text-center">${qty}</td>
                 <td class="text-center">${minCtc}</td>
                 <td class="text-center">${maxCtc}</td>
@@ -3022,16 +3022,16 @@ export const ReportsPage: React.FC = () => {
         XLSX.utils.book_append_sheet(wb, wsRpt, 'RPT Collections (AF56)');
       }
 
-      // 7. Community Tax Sheet (AF 0016)
+      // 7. Community Tax Sheet (BRF 0016)
       const ctcDataToExport = filteredCtcCollections.length > 0 ? filteredCtcCollections : communityTaxCollections;
       if (ctcDataToExport.length > 0) {
         const ctcSheetData = ctcDataToExport.map((item, idx) => ({
           '#': idx + 1,
           'Date': item.date || '',
-          'Form No.': item.afNo || 'AF 0016',
+          'Form No.': item.afNo || 'BRF 0016',
           'CTC Number': item.ctcNo || '',
           'Taxpayer Name': item.taxpayerName || '',
-          'Classification': item.ctcType || 'Individual',
+          'Gender': item.gender || 'Male',
           'Barangay': item.barangay || '',
           'Address': item.address || '',
           'Basic Tax (PHP)': item.basicTax ?? 0,
@@ -3057,7 +3057,7 @@ export const ReportsPage: React.FC = () => {
           { wch: 18 },
           { wch: 25 }
         ];
-        XLSX.utils.book_append_sheet(wb, wsCtc, 'Community Tax (AF 0016)');
+        XLSX.utils.book_append_sheet(wb, wsCtc, 'Community Tax (BRF 0016)');
       }
 
       const timestamp = new Date().toISOString().slice(0, 10);
@@ -3327,7 +3327,7 @@ export const ReportsPage: React.FC = () => {
                   <Print />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Print Official Community Tax RCD (A.F. NO. 0016)" arrow>
+              <Tooltip title="Print Official Community Tax RCD (BRF NO. 0016)" arrow>
                 <IconButton
                   color="primary"
                   onClick={() => handleInitiatePrint('COMMUNITY_TAX')}
@@ -3791,22 +3791,22 @@ export const ReportsPage: React.FC = () => {
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4, md: 2 }}>
                       <FormControl fullWidth size="small">
-                        <InputLabel>Classification</InputLabel>
+                        <InputLabel>Gender</InputLabel>
                         <Select
                           value={ctcFilterType}
-                          label="Classification"
+                          label="Gender"
                           onChange={(e) => setCtcFilterType(e.target.value)}
                         >
-                          <MenuItem value="ALL">All Classifications</MenuItem>
-                          <MenuItem value="Individual">Individual (₱5 base)</MenuItem>
-                          <MenuItem value="Corporation">Corporation (₱500 base)</MenuItem>
+                          <MenuItem value="ALL">All Genders</MenuItem>
+                          <MenuItem value="Male">Male</MenuItem>
+                          <MenuItem value="Female">Female</MenuItem>
                         </Select>
                       </FormControl>
                     </Grid>
                     <Grid size={{ xs: 6, sm: 4, md: 2.5 }}>
                       <Autocomplete
                         size="small"
-                        options={['Agbun-od', 'Bachawan', 'Calabogo', 'Concepcion', 'Corcuera', 'Guintiguiban', 'Ilijan', 'Labnig', 'Mabini', 'Poblacion', 'San Agustin', 'San Pedro']}
+                        options={['Bakhawan', 'Calabasahan', 'Dalajican', 'Masadya', 'Masudsud', 'Poblacion', 'Sampong', 'San Pedro', 'San Vicente']}
                         value={ctcFilterBarangay}
                         onChange={(_, val) => setCtcFilterBarangay(val)}
                         renderInput={(params) => <TextField {...params} label="Filter Barangay" />}
@@ -3869,7 +3869,7 @@ export const ReportsPage: React.FC = () => {
                         <TableCell sx={{ fontWeight: 700, color: '#334155' }}>Form No.</TableCell>
                         <TableCell sx={{ fontWeight: 700, color: '#334155' }}>CTC No.</TableCell>
                         <TableCell sx={{ fontWeight: 700, color: '#334155' }}>Taxpayer Name</TableCell>
-                        <TableCell sx={{ fontWeight: 700, color: '#334155' }}>Classification</TableCell>
+                        <TableCell sx={{ fontWeight: 700, color: '#334155' }}>Gender</TableCell>
                         <TableCell sx={{ fontWeight: 700, color: '#334155' }}>Barangay</TableCell>
                         <TableCell align="right" sx={{ fontWeight: 700, color: '#334155' }}>Basic</TableCell>
                         <TableCell align="right" sx={{ fontWeight: 700, color: '#334155' }}>Additional</TableCell>
@@ -3892,16 +3892,23 @@ export const ReportsPage: React.FC = () => {
                             <TableRow key={item.id} hover>
                               <TableCell>{item.date || '-'}</TableCell>
                               <TableCell>
-                                <Chip label={item.afNo || 'AF 0016'} size="small" sx={{ height: 20, fontSize: '0.72rem', bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700 }} />
+                                <Chip label={item.afNo || 'BRF 0016'} size="small" sx={{ height: 20, fontSize: '0.72rem', bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700 }} />
                               </TableCell>
                               <TableCell sx={{ fontWeight: 700, color: '#0284c7' }}>{item.ctcNo || '-'}</TableCell>
                               <TableCell sx={{ fontWeight: 600 }}>{item.taxpayerName || '-'}</TableCell>
                               <TableCell>
                                 <Chip
-                                  label={item.ctcType || 'Individual'}
+                                  label={item.gender || 'Male'}
                                   size="small"
-                                  color={item.ctcType === 'Corporation' ? 'warning' : 'default'}
-                                  sx={{ height: 20, fontSize: '0.72rem', fontWeight: 600 }}
+                                  sx={{ 
+                                    height: 20, 
+                                    fontSize: '0.72rem', 
+                                    fontWeight: 600,
+                                    bgcolor: (item.gender || 'Male') === 'Female' ? '#fdf2f8' : '#f0f9ff',
+                                    color: (item.gender || 'Male') === 'Female' ? '#db2777' : '#0284c7',
+                                    border: '1px solid',
+                                    borderColor: (item.gender || 'Male') === 'Female' ? '#fbcfe8' : '#bae6fd'
+                                  }}
                                 />
                               </TableCell>
                               <TableCell>{item.barangay || '-'}</TableCell>
@@ -3980,7 +3987,7 @@ export const ReportsPage: React.FC = () => {
                 ? 'RPT General Fund (A.F. NO. 56)' 
                 : printTarget === 'RPT_SEF'
                 ? 'RPT SEF Fund (A.F. NO. 56)'
-                : 'Community Tax (A.F. NO. 0016)'
+                : 'Community Tax (BRF NO. 0016)'
             }
             size="small"
             color="primary"

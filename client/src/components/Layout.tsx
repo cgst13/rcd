@@ -247,9 +247,9 @@ export const Layout: React.FC = () => {
           </Tooltip>
         </ListItem>
 
-        {/* 3b. Community Tax (AF 0016) */}
+        {/* 3b. Community Tax (BRF 0016) */}
         <ListItem disablePadding sx={{ mb: 0.5 }}>
-          <Tooltip title={isCollapsed ? 'Community Tax (AF 0016)' : ''} placement="right" arrow>
+          <Tooltip title={isCollapsed ? 'Community Tax (BRF 0016)' : ''} placement="right" arrow>
             <ListItemButton
               selected={isRouteActive('/community-tax')}
               onClick={() => { navigate('/community-tax'); setMobileOpen(false); }}
@@ -270,7 +270,7 @@ export const Layout: React.FC = () => {
               {!isCollapsed && (
                 <ListItemText 
                   primary="Community Tax" 
-                  secondary="AF 0016 Cedula"
+                  secondary="BRF 0016 Cedula"
                   primaryTypographyProps={{ fontWeight: isRouteActive('/community-tax') ? 700 : 500, fontSize: '0.88rem' }} 
                   secondaryTypographyProps={{ fontSize: '0.70rem' }}
                 />

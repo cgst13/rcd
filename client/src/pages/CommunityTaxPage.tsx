@@ -20,8 +20,6 @@ import {
   CircularProgress, 
   Backdrop, 
   Divider, 
-  Card, 
-  CardContent, 
   Stack, 
   TablePagination, 
   InputAdornment, 
@@ -47,10 +45,8 @@ import {
   FileDownload, 
   Check, 
   AdminPanelSettings, 
-  Badge,
-  Business,
-  Person,
-  ReceiptLong
+  ReceiptLong,
+  Close
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
@@ -64,12 +60,10 @@ import {
 import type { CommunityTaxItem } from '../types/rcd';
 
 const BARANGAYS = [
-  'Agbatad',
-  'Agmanic',
-  'Bacong',
   'Bakhawan',
   'Calabasahan',
   'Dalajican',
+  'Masadya',
   'Masudsud',
   'Poblacion',
   'Sampong',
@@ -81,11 +75,64 @@ const getNextCtcNo = (currentCtcNo: string): string => {
   let nextNo = currentCtcNo.trim();
   const matchNum = nextNo.match(/(\d+)$/);
   if (matchNum) {
+    const prefix = nextNo.slice(0, matchNum.index);
     const digits = matchNum[1];
     const incremented = (parseInt(digits, 10) + 1).toString().padStart(digits.length, '0');
-    return nextNo.slice(0, matchNum.index) + incremented;
+    return prefix + incremented;
+  } else if (nextNo && !isNaN(Number(nextNo))) {
+    return String(Number(nextNo) + 1).padStart(8, '0');
   }
   return nextNo;
+};
+
+const getAutoCtcNo = (records: CommunityTaxItem[]): string => {
+  if (!records || records.length === 0) return '00000001';
+  const validRecords = records.filter(r => r.ctcNo && r.ctcNo.trim());
+  if (validRecords.length === 0) return '00000001';
+
+  let bestCtcNo = validRecords[0].ctcNo.trim();
+  let maxNum = -1;
+
+  for (const rec of validRecords) {
+    const raw = rec.ctcNo.trim();
+    const match = raw.match(/(\d+)$/);
+    if (match) {
+      const val = parseInt(match[1], 10);
+      if (val > maxNum) {
+        maxNum = val;
+        bestCtcNo = raw;
+      }
+    }
+  }
+
+  return getNextCtcNo(bestCtcNo);
+};
+
+export const getPenaltyRate = (dateStr: string): number => {
+  if (!dateStr) return 0;
+  const parts = dateStr.split('-');
+  let month = 0;
+  if (parts.length >= 2) {
+    month = parseInt(parts[1], 10);
+  } else {
+    month = new Date(dateStr).getMonth() + 1;
+  }
+
+  // January (1) and February (2): No penalty (0%)
+  if (isNaN(month) || month <= 2) {
+    return 0;
+  }
+
+  // Penalty is 2% per month of (Basic Community Tax + Additional Community Tax),
+  // starting in March (3 months * 2% = 6% penalty).
+  return (month * 2) / 100;
+};
+
+export const calculatePenalty = (dateStr: string, basicTax: number, additionalTax: number): number => {
+  const rate = getPenaltyRate(dateStr);
+  if (rate <= 0) return 0;
+  const base = Math.max(0, basicTax) + Math.max(0, additionalTax);
+  return parseFloat((base * rate).toFixed(2));
 };
 
 export const CommunityTaxPage: React.FC = () => {
@@ -95,7 +142,7 @@ export const CommunityTaxPage: React.FC = () => {
   const [items, setItems] = useState<CommunityTaxItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState<string>('ALL');
+  const [filterGender, setFilterGender] = useState<string>('ALL');
   const [filterBarangay, setFilterBarangay] = useState<string | null>(null);
   const [filterDate, setFilterDate] = useState('');
 
@@ -103,24 +150,70 @@ export const CommunityTaxPage: React.FC = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  // Modal Dialogs
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // Delete Confirmation Modal State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<CommunityTaxItem | null>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<CommunityTaxItem | null>(null);
+
+  const handleDeleteClick = (item: CommunityTaxItem) => {
+    setItemToDelete(item);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    const target = itemToDelete;
+    setDeleteDialogOpen(false);
+    setLoading(true);
+    try {
+      const success = await deleteCommunityTaxCollection(target.id);
+      if (success) {
+        setItems(prev => prev.filter(i => i.id !== target.id));
+        setNotification({
+          open: true,
+          message: `CTC #${target.ctcNo} deleted successfully.`,
+          severity: 'success'
+        });
+        if (selectedRecord?.id === target.id) {
+          setDetailsDialogOpen(false);
+        }
+      } else {
+        setNotification({ open: true, message: 'Failed to delete entry.', severity: 'error' });
+      }
+    } catch (err) {
+      console.error(err);
+      setNotification({ open: true, message: 'Error deleting entry.', severity: 'error' });
+    } finally {
+      setLoading(false);
+      setItemToDelete(null);
+    }
+  };
+
+  const handleViewDetails = (item: CommunityTaxItem) => {
+    setSelectedRecord(item);
+    setDetailsDialogOpen(true);
+  };
 
   // Form State
+  const formCardRef = useRef<HTMLDivElement>(null);
+  const taxpayerRef = useRef<HTMLInputElement>(null);
+  const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [formData, setFormData] = useState({
-    afNo: 'AF 0016',
+    afNo: 'BRF 0016',
+    bookletNo: '',
     ctcNo: '',
     taxpayerName: '',
     ctcType: 'Individual' as 'Individual' | 'Corporation',
+    gender: 'Male' as 'Male' | 'Female',
     barangay: 'Poblacion',
     address: '',
+    basicSalary: '0',
     basicTax: '5',
-    additionalTax: '0',
+    additionalTax: '20',
     penalty: '0',
-    amount: '5',
+    amount: '25',
     date: new Date().toISOString().split('T')[0],
     remarks: ''
   });
@@ -140,16 +233,16 @@ export const CommunityTaxPage: React.FC = () => {
   const [importedRows, setImportedRows] = useState<Array<Omit<CommunityTaxItem, 'id'>>>([]);
   const [isImporting, setIsImporting] = useState(false);
 
-  const taxpayerRef = useRef<HTMLInputElement>(null);
-
-  const loadData = async () => {
+  const loadData = async (): Promise<CommunityTaxItem[]> => {
     setLoading(true);
     try {
       const data = await getCommunityTaxCollections();
       setItems(data);
+      return data;
     } catch (err) {
       console.error('Failed to load Community Tax data:', err);
       setNotification({ open: true, message: 'Failed to load Community Tax entries.', severity: 'error' });
+      return [];
     } finally {
       setLoading(false);
     }
@@ -159,73 +252,145 @@ export const CommunityTaxPage: React.FC = () => {
     loadData();
   }, []);
 
-  // Update total amount dynamically when basic, additional, or penalty change
-  const handleTaxComponentChange = (field: 'basicTax' | 'additionalTax' | 'penalty', val: string) => {
-    const updatedForm = { ...formData, [field]: val };
-    const b = parseFloat(updatedForm.basicTax) || 0;
-    const a = parseFloat(updatedForm.additionalTax) || 0;
-    const p = parseFloat(updatedForm.penalty) || 0;
-    updatedForm.amount = (b + a + p).toFixed(2);
-    setFormData(updatedForm);
+  // Update initial CTC number and Booklet number when items load
+  useEffect(() => {
+    if (!editingId && !formData.taxpayerName && items.length > 0) {
+      const nextNo = getAutoCtcNo(items);
+      const latestBooklet = items[0]?.bookletNo || '';
+      setFormData(prev => ({ 
+        ...prev, 
+        ctcNo: nextNo,
+        bookletNo: prev.bookletNo || latestBooklet
+      }));
+    }
+  }, [items, editingId]);
+
+  // Update calculations for Gender, Basic Salary, Basic Tax, Penalty, and Total Amount
+  const updateFormCalculations = (partial: Partial<typeof formData>) => {
+    setFormData(prev => {
+      const merged = { ...prev, ...partial };
+      
+      const bTax = parseFloat(merged.basicTax) || 0;
+      const bSalary = parseFloat(merged.basicSalary) || 0;
+
+      // Additional Tax:
+      // If basicSalary > 0: (basicSalary * 12) / 1000
+      // If basicSalary === 0: Male = 20, Female = 10 (or keep manually entered additional tax)
+      let addTax: number;
+      if (partial.additionalTax !== undefined && bSalary === 0) {
+        addTax = parseFloat(partial.additionalTax) || 0;
+      } else if (bSalary > 0) {
+        addTax = parseFloat(((bSalary * 12) / 1000).toFixed(2));
+      } else {
+        addTax = merged.gender === 'Female' ? 10 : 20;
+      }
+
+      // Penalty:
+      // 2% per month of (Basic Community Tax + Additional Community Tax),
+      // starting March with 6% (no penalty on Jan and Feb)
+      let pen: number;
+      if (partial.penalty !== undefined) {
+        pen = parseFloat(partial.penalty) || 0;
+      } else {
+        pen = calculatePenalty(merged.date, bTax, addTax);
+      }
+
+      const total = parseFloat((bTax + addTax + pen).toFixed(2));
+
+      return {
+        ...merged,
+        additionalTax: addTax.toString(),
+        penalty: pen.toString(),
+        amount: total.toString()
+      };
+    });
   };
 
-  const handleTypeChange = (type: 'Individual' | 'Corporation') => {
-    const defaultBasic = type === 'Corporation' ? '500' : '5';
-    const a = parseFloat(formData.additionalTax) || 0;
-    const p = parseFloat(formData.penalty) || 0;
-    const total = (parseFloat(defaultBasic) + a + p).toFixed(2);
+  const handleResetForm = () => {
+    const nextNo = getAutoCtcNo(items);
+    const latestBooklet = items[0]?.bookletNo || formData.bookletNo || '';
+    const currentDate = new Date().toISOString().split('T')[0];
+    const defaultBasic = '5';
+    const defaultGender = 'Male' as const;
+    const defaultSalary = '0';
+    const defaultAdditional = '20';
+    const pen = calculatePenalty(currentDate, parseFloat(defaultBasic), parseFloat(defaultAdditional));
+    const total = (parseFloat(defaultBasic) + parseFloat(defaultAdditional) + pen).toFixed(2);
+
+    setEditingId(null);
     setFormData({
-      ...formData,
-      ctcType: type,
+      afNo: 'BRF 0016',
+      bookletNo: latestBooklet,
+      ctcNo: nextNo,
+      taxpayerName: '',
+      ctcType: 'Individual',
+      gender: defaultGender,
+      barangay: 'Poblacion',
+      address: '',
+      basicSalary: defaultSalary,
       basicTax: defaultBasic,
-      amount: total
+      additionalTax: defaultAdditional,
+      penalty: pen.toString(),
+      amount: total,
+      date: currentDate,
+      remarks: ''
     });
   };
 
   const handleOpenAddDialog = () => {
-    let nextNo = '';
-    if (items.length > 0) {
-      const lastCtc = items[0].ctcNo;
-      if (lastCtc) {
-        nextNo = getNextCtcNo(lastCtc);
-      }
+    if (!showForm) {
+      handleResetForm();
+      setShowForm(true);
+      setTimeout(() => {
+        formCardRef.current?.scrollIntoView({ behavior: 'smooth' });
+        taxpayerRef.current?.focus();
+      }, 50);
+    } else {
+      setShowForm(false);
     }
-
-    setEditingId(null);
-    setFormData({
-      afNo: 'AF 0016',
-      ctcNo: nextNo,
-      taxpayerName: '',
-      ctcType: 'Individual',
-      barangay: 'Poblacion',
-      address: '',
-      basicTax: '5',
-      additionalTax: '0',
-      penalty: '0',
-      amount: '5',
-      date: new Date().toISOString().split('T')[0],
-      remarks: ''
-    });
-    setDialogOpen(true);
   };
 
   const handleEdit = (item: CommunityTaxItem) => {
+    setShowForm(true);
     setEditingId(item.id);
+    let g: 'Male' | 'Female' = item.gender || 'Male';
+    if (!item.gender && item.remarks) {
+      if (item.remarks.includes('[Gender: Female]') || item.remarks.includes('Gender: Female')) g = 'Female';
+      else if (item.remarks.includes('[Gender: Male]') || item.remarks.includes('Gender: Male')) g = 'Male';
+    }
+
+    let sal = item.basicSalary !== undefined ? String(item.basicSalary) : '0';
+    if (sal === '0' && item.remarks) {
+      const matchSal = item.remarks.match(/\[Salary:\s*([\d,.]+)\]/);
+      if (matchSal) sal = matchSal[1];
+    }
+
+    const cleanRemarks = (item.remarks || '')
+      .replace(/\[Gender:[^\]]+\]/g, '')
+      .replace(/\[Salary:[^\]]+\]/g, '')
+      .trim();
+
     setFormData({
-      afNo: item.afNo || 'AF 0016',
+      afNo: item.afNo || 'BRF 0016',
+      bookletNo: item.bookletNo || '',
       ctcNo: item.ctcNo || '',
       taxpayerName: item.taxpayerName || '',
       ctcType: item.ctcType || 'Individual',
+      gender: g,
       barangay: item.barangay || 'Poblacion',
       address: item.address || '',
+      basicSalary: sal,
       basicTax: String(item.basicTax ?? (item.ctcType === 'Corporation' ? 500 : 5)),
-      additionalTax: String(item.additionalTax ?? 0),
+      additionalTax: String(item.additionalTax ?? (g === 'Female' ? 10 : 20)),
       penalty: String(item.penalty ?? 0),
       amount: String(item.amount ?? 0),
       date: item.date || new Date().toISOString().split('T')[0],
-      remarks: item.remarks || ''
+      remarks: cleanRemarks
     });
-    setDialogOpen(true);
+    setTimeout(() => {
+      formCardRef.current?.scrollIntoView({ behavior: 'smooth' });
+      taxpayerRef.current?.focus();
+    }, 50);
   };
 
   const handleSave = async () => {
@@ -244,22 +409,43 @@ export const CommunityTaxPage: React.FC = () => {
       return;
     }
 
+    const metaRemarks = [
+      formData.remarks.trim(),
+      formData.ctcType === 'Individual' ? `[Gender: ${formData.gender}]` : '',
+      parseFloat(formData.basicSalary) > 0 ? `[Salary: ${formData.basicSalary}]` : ''
+    ].filter(Boolean).join(' ');
+
+    const duplicate = items.find(
+      i => i.ctcNo.trim().toLowerCase() === formData.ctcNo.trim().toLowerCase() && i.id !== editingId
+    );
+    if (duplicate) {
+      setNotification({
+        open: true,
+        message: `CTC Number "${formData.ctcNo.trim()}" is already assigned to "${duplicate.taxpayerName}". Please specify a unique CTC Number.`,
+        severity: 'error'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const itemToSave: CommunityTaxItem = {
         id: editingId || 0,
-        afNo: formData.afNo || 'AF 0016',
+        afNo: formData.afNo || 'BRF 0016',
+        bookletNo: formData.bookletNo.trim(),
         ctcNo: formData.ctcNo.trim(),
         taxpayerName: formData.taxpayerName.trim().toUpperCase(),
         ctcType: formData.ctcType,
+        gender: formData.gender,
         barangay: formData.barangay,
-        address: formData.address.trim(),
+        address: '',
+        basicSalary: parseFloat(formData.basicSalary) || 0,
         basicTax: parseFloat(formData.basicTax) || 0,
         additionalTax: parseFloat(formData.additionalTax) || 0,
         penalty: parseFloat(formData.penalty) || 0,
         amount: totalAmount,
         date: formData.date,
-        remarks: formData.remarks.trim()
+        remarks: metaRemarks
       };
 
       const success = await saveCommunityTaxCollection(itemToSave);
@@ -269,41 +455,53 @@ export const CommunityTaxPage: React.FC = () => {
           message: editingId ? 'Community Tax entry updated!' : 'Community Tax entry saved!',
           severity: 'success'
         });
-        setDialogOpen(false);
-        await loadData();
+        const updatedItems = await loadData();
+        const nextCtc = getAutoCtcNo(updatedItems);
+        const preservedBooklet = formData.bookletNo.trim();
+        const currentDate = new Date().toISOString().split('T')[0];
+        const defaultBasic = '5';
+        const defaultGender = 'Male' as const;
+        const defaultSalary = '0';
+        const defaultAdditional = '20';
+        const pen = calculatePenalty(currentDate, parseFloat(defaultBasic), parseFloat(defaultAdditional));
+        const total = (parseFloat(defaultBasic) + parseFloat(defaultAdditional) + pen).toFixed(2);
+
+        setEditingId(null);
+        setFormData({
+          afNo: 'BRF 0016',
+          bookletNo: preservedBooklet,
+          ctcNo: nextCtc,
+          taxpayerName: '',
+          ctcType: 'Individual',
+          gender: defaultGender,
+          barangay: 'Poblacion',
+          address: '',
+          basicSalary: defaultSalary,
+          basicTax: defaultBasic,
+          additionalTax: defaultAdditional,
+          penalty: pen.toString(),
+          amount: total,
+          date: currentDate,
+          remarks: ''
+        });
+
+        setShowForm(true);
+
+        setTimeout(() => {
+          taxpayerRef.current?.focus();
+        }, 100);
       } else {
         setNotification({ open: true, message: 'Failed to save entry. Please try again.', severity: 'error' });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setNotification({ open: true, message: 'An error occurred while saving.', severity: 'error' });
+      setNotification({ 
+        open: true, 
+        message: err?.message || 'An error occurred while saving.', 
+        severity: 'error' 
+      });
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!itemToDelete) return;
-    setLoading(true);
-    try {
-      const success = await deleteCommunityTaxCollection(itemToDelete.id);
-      if (success) {
-        setItems(items.filter(i => i.id !== itemToDelete.id));
-        setNotification({
-          open: true,
-          message: `CTC #${itemToDelete.ctcNo} deleted successfully.`,
-          severity: 'success'
-        });
-      } else {
-        setNotification({ open: true, message: 'Failed to delete entry.', severity: 'error' });
-      }
-    } catch (err) {
-      console.error(err);
-      setNotification({ open: true, message: 'Error deleting entry.', severity: 'error' });
-    } finally {
-      setLoading(false);
-      setDeleteDialogOpen(false);
-      setItemToDelete(null);
     }
   };
 
@@ -313,54 +511,50 @@ export const CommunityTaxPage: React.FC = () => {
       const matchSearch = 
         (item.taxpayerName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (item.ctcNo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.bookletNo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (item.remarks || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (item.address || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-      const matchType = filterType === 'ALL' || item.ctcType === filterType;
+      const matchGender = filterGender === 'ALL' || (item.gender || 'Male') === filterGender;
       const matchBarangay = !filterBarangay || item.barangay === filterBarangay;
       const matchDate = !filterDate || (item.date && item.date.startsWith(filterDate));
 
-      return matchSearch && matchType && matchBarangay && matchDate;
+      return matchSearch && matchGender && matchBarangay && matchDate;
     });
-  }, [items, searchTerm, filterType, filterBarangay, filterDate]);
-
-  // Statistics
-  const totalAmount = useMemo(() => items.reduce((s, i) => s + (i.amount || 0), 0), [items]);
-  const individualCount = useMemo(() => items.filter(i => i.ctcType === 'Individual').length, [items]);
-  const corporateCount = useMemo(() => items.filter(i => i.ctcType === 'Corporation').length, [items]);
-  const individualAmount = useMemo(() => items.filter(i => i.ctcType === 'Individual').reduce((s, i) => s + (i.amount || 0), 0), [items]);
-  const corporateAmount = useMemo(() => items.filter(i => i.ctcType === 'Corporation').reduce((s, i) => s + (i.amount || 0), 0), [items]);
+  }, [items, searchTerm, filterGender, filterBarangay, filterDate]);
 
   // Excel Template Download
   const handleDownloadTemplate = () => {
     const templateData = [
       {
-        'Form No': 'AF 0016',
+        'Form No': 'BRF 0016',
+        'Booklet No': '01',
         'CTC Number': 'CCI2026-00001',
         'Taxpayer Name': 'JUAN DELA CRUZ',
-        'Type': 'Individual',
+        'Gender': 'Male',
         'Barangay': 'Poblacion',
-        'Address': 'Zone 1, Poblacion, Concepcion, Romblon',
+        'Basic Salary': 0,
         'Basic Tax': 5,
-        'Additional Tax': 150,
+        'Additional Tax': 20,
         'Penalty': 0,
-        'Total Amount': 155,
+        'Total Amount': 25,
         'Date': new Date().toISOString().split('T')[0],
-        'Remarks': 'Employed / Business'
+        'Remarks': 'Self-employed / Farmer'
       },
       {
-        'Form No': 'AF 0016',
-        'CTC Number': 'CCC2026-00001',
-        'Taxpayer Name': 'CONCEPCION AGRI TRADING CORP',
-        'Type': 'Corporation',
-        'Barangay': 'San Pedro',
-        'Address': 'San Pedro, Concepcion, Romblon',
-        'Basic Tax': 500,
-        'Additional Tax': 1200,
+        'Form No': 'BRF 0016',
+        'Booklet No': '01',
+        'CTC Number': 'CCI2026-00002',
+        'Taxpayer Name': 'MARIA SANTOS',
+        'Gender': 'Female',
+        'Barangay': 'Bakhawan',
+        'Basic Salary': 15000,
+        'Basic Tax': 5,
+        'Additional Tax': 180,
         'Penalty': 0,
-        'Total Amount': 1700,
+        'Total Amount': 185,
         'Date': new Date().toISOString().split('T')[0],
-        'Remarks': 'Corporate Cedula'
+        'Remarks': 'Employed at School'
       }
     ];
 
@@ -368,11 +562,12 @@ export const CommunityTaxPage: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(templateData);
     ws['!cols'] = [
       { wch: 12 },
+      { wch: 12 },
       { wch: 16 },
       { wch: 30 },
-      { wch: 14 },
+      { wch: 10 },
       { wch: 16 },
-      { wch: 35 },
+      { wch: 14 },
       { wch: 12 },
       { wch: 15 },
       { wch: 12 },
@@ -381,7 +576,7 @@ export const CommunityTaxPage: React.FC = () => {
       { wch: 25 }
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Community Tax Template');
-    XLSX.writeFile(wb, 'Community_Tax_Template_AF0016.xlsx');
+    XLSX.writeFile(wb, 'Community_Tax_Template_BRF0016.xlsx');
   };
 
   // Excel File Upload
@@ -405,8 +600,11 @@ export const CommunityTaxPage: React.FC = () => {
         const parsed: Array<Omit<CommunityTaxItem, 'id'>> = jsonRows.map(row => {
           const rawType = String(row['Type'] || row['Classification'] || row['CTC Type'] || 'Individual').trim();
           const ctcType: 'Individual' | 'Corporation' = rawType.toLowerCase().includes('corp') ? 'Corporation' : 'Individual';
+          const rawGender = String(row['Gender'] || row['Sex'] || '').trim();
+          const gender: 'Male' | 'Female' = rawGender.toLowerCase().startsWith('f') ? 'Female' : 'Male';
+          const basicSalary = parseFloat(row['Basic Salary'] || row['Salary'] || 0) || 0;
           const b = parseFloat(row['Basic Tax'] || row['Basic'] || (ctcType === 'Corporation' ? 500 : 5)) || 0;
-          const a = parseFloat(row['Additional Tax'] || row['Additional'] || 0) || 0;
+          const a = parseFloat(row['Additional Tax'] || row['Additional'] || (gender === 'Female' ? 10 : 20)) || 0;
           const p = parseFloat(row['Penalty'] || row['Interest'] || 0) || 0;
           const total = parseFloat(row['Total Amount'] || row['Amount'] || (b + a + p)) || (b + a + p);
 
@@ -420,12 +618,15 @@ export const CommunityTaxPage: React.FC = () => {
           }
 
           return {
-            afNo: String(row['Form No'] || row['AF No'] || 'AF 0016').trim(),
+            afNo: String(row['Form No'] || row['AF No'] || 'BRF 0016').trim(),
+            bookletNo: String(row['Booklet No'] || row['Booklet Number'] || row['Booklet'] || row['Bk No'] || '').trim(),
             ctcNo: String(row['CTC Number'] || row['CTC No'] || row['Certificate No'] || row['OR Number'] || '').trim(),
             taxpayerName: String(row['Taxpayer Name'] || row['Payor'] || row['Name'] || '').trim().toUpperCase(),
             ctcType,
+            gender,
+            basicSalary,
             barangay: String(row['Barangay'] || 'Poblacion').trim(),
-            address: String(row['Address'] || '').trim(),
+            address: '',
             basicTax: b,
             additionalTax: a,
             penalty: p,
@@ -492,11 +693,12 @@ export const CommunityTaxPage: React.FC = () => {
       '#': idx + 1,
       'Date': item.date,
       'Form No': item.afNo,
+      'Booklet No': item.bookletNo || '',
       'CTC Number': item.ctcNo,
       'Taxpayer Name': item.taxpayerName,
-      'Classification': item.ctcType,
+      'Gender': item.gender || 'Male',
       'Barangay': item.barangay,
-      'Address': item.address || '',
+      'Basic Salary': item.basicSalary || 0,
       'Basic Tax': item.basicTax,
       'Additional Tax': item.additionalTax,
       'Penalty / Surcharge': item.penalty || 0,
@@ -510,11 +712,12 @@ export const CommunityTaxPage: React.FC = () => {
       { wch: 6 },
       { wch: 12 },
       { wch: 10 },
+      { wch: 12 },
       { wch: 16 },
       { wch: 28 },
       { wch: 14 },
       { wch: 16 },
-      { wch: 25 },
+      { wch: 15 },
       { wch: 12 },
       { wch: 15 },
       { wch: 15 },
@@ -523,7 +726,7 @@ export const CommunityTaxPage: React.FC = () => {
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Community Tax');
     const dateStr = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(wb, `Community_Tax_AF0016_${dateStr}.xlsx`);
+    XLSX.writeFile(wb, `Community_Tax_BRF0016_${dateStr}.xlsx`);
     setNotification({ open: true, message: 'Community Tax exported to Excel!', severity: 'success' });
   };
 
@@ -542,11 +745,14 @@ export const CommunityTaxPage: React.FC = () => {
 
       <ConfirmDialog
         open={deleteDialogOpen}
-        onClose={() => setDeleteDialogOpen(false)}
-        onConfirm={handleDelete}
-        title="Delete Community Tax Certificate?"
-        message={`Are you sure you want to delete CTC #${itemToDelete?.ctcNo} for ${itemToDelete?.taxpayerName}? This action cannot be undone.`}
-        confirmText="Delete Certificate"
+        onClose={() => {
+          setDeleteDialogOpen(false);
+          setItemToDelete(null);
+        }}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Community Tax Certificate"
+        message={itemToDelete ? `Are you sure you want to delete CTC #${itemToDelete.ctcNo} for ${itemToDelete.taxpayerName}? This action cannot be undone.` : "Are you sure you want to delete this certificate?"}
+        confirmText="Delete"
         severity="error"
       />
 
@@ -566,7 +772,7 @@ export const CommunityTaxPage: React.FC = () => {
               Community Tax
             </Typography>
             <Chip 
-              label="Accountable Form No. 0016" 
+              label="BRF No. 0016" 
               size="small" 
               sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0284c7', border: '1px solid rgba(14, 165, 233, 0.3)' }} 
             />
@@ -574,7 +780,7 @@ export const CommunityTaxPage: React.FC = () => {
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             {isAdmin 
               ? "Auditing and monitoring Community Tax Certificates (Cedula) encoded across all collectors."
-              : "Encode, issue, and manage Community Tax Certificates (Individual & Corporate) under Accountable Form No. 0016."}
+              : "Encode, issue, and manage Community Tax Certificates (Individual & Corporate) under Accountable Form BRF No. 0016."}
           </Typography>
         </Box>
 
@@ -620,12 +826,12 @@ export const CommunityTaxPage: React.FC = () => {
           </Tooltip>
 
           {!isAdmin && (
-            <Tooltip title="Issue New Community Tax Certificate" arrow>
+            <Tooltip title={showForm ? "Hide Form" : "Issue New Community Tax Certificate"} arrow>
               <IconButton 
                 color="primary"
                 onClick={handleOpenAddDialog}
                 sx={{ 
-                  bgcolor: '#0284c7', 
+                  bgcolor: showForm ? '#0369a1' : '#0284c7', 
                   color: '#ffffff', 
                   p: 1.4,
                   borderRadius: 1,
@@ -668,92 +874,240 @@ export const CommunityTaxPage: React.FC = () => {
         </Paper>
       )}
 
-      {/* Summary KPI Cards */}
-      <Grid container spacing={2.5} sx={{ mb: 3.5 }}>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
-            <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography variant="caption" fontWeight="700" color="text.secondary" sx={{ textTransform: 'uppercase' }}>
-                  Total CTC Collection
-                </Typography>
-                <Box sx={{ p: 0.8, bgcolor: '#f0fdf4', color: '#16a34a', borderRadius: 1 }}>
-                  <ReceiptLong fontSize="small" />
-                </Box>
+      {/* On-Page Issue / Edit Community Tax Certificate Form (Hidden by default) */}
+      {showForm && (
+        <Paper 
+          ref={formCardRef} 
+          elevation={0} 
+          sx={{ 
+            p: 3, 
+            mb: 3, 
+            borderRadius: 1.5, 
+            border: '1px solid #e2e8f0', 
+            bgcolor: '#ffffff' 
+          }}
+        >
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, pb: 1.5, borderBottom: '1px solid #f1f5f9' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+              <Box sx={{ p: 1, bgcolor: '#e0f2fe', color: '#0284c7', borderRadius: 1, display: 'flex' }}>
+                <ReceiptLong fontSize="small" />
               </Box>
-              <Typography variant="h5" fontWeight="800" sx={{ color: '#0f172a' }}>
-                ₱ {totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {items.length} total certificates issued
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+              <Box>
+                <Typography variant="h6" fontWeight="800" sx={{ color: '#0f172a', fontSize: '1.05rem' }}>
+                  {editingId ? 'Edit Community Tax Certificate' : 'Issue Community Tax Certificate (Cedula)'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {editingId ? `Editing details for CTC #${formData.ctcNo}` : 'BRF No. 0016 — Encode taxpayer details and community tax breakdown'}
+                </Typography>
+              </Box>
+            </Box>
 
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
-            <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography variant="caption" fontWeight="700" color="text.secondary" sx={{ textTransform: 'uppercase' }}>
-                  Individual (CCI)
-                </Typography>
-                <Box sx={{ p: 0.8, bgcolor: '#f0f9ff', color: '#0284c7', borderRadius: 1 }}>
-                  <Person fontSize="small" />
-                </Box>
-              </Box>
-              <Typography variant="h5" fontWeight="800" sx={{ color: '#0f172a' }}>
-                ₱ {individualAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {individualCount} Individual cedulas
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {editingId ? (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => {
+                    handleResetForm();
+                    setShowForm(false);
+                  }}
+                  sx={{ borderColor: '#e2e8f0', color: '#64748b' }}
+                >
+                  Cancel Edit
+                </Button>
+              ) : (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={() => setShowForm(false)}
+                  sx={{ borderColor: '#e2e8f0', color: '#64748b' }}
+                >
+                  Close Form
+                </Button>
+              )}
+            </Box>
+          </Box>
 
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
-            <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography variant="caption" fontWeight="700" color="text.secondary" sx={{ textTransform: 'uppercase' }}>
-                  Corporation (CCC)
-                </Typography>
-                <Box sx={{ p: 0.8, bgcolor: '#faf5ff', color: '#9333ea', borderRadius: 1 }}>
-                  <Business fontSize="small" />
-                </Box>
-              </Box>
-              <Typography variant="h5" fontWeight="800" sx={{ color: '#0f172a' }}>
-                ₱ {corporateAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {corporateCount} Corporate cedulas
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+          <Grid container spacing={2.5}>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <TextField
+                label="Booklet No."
+                value={formData.bookletNo}
+                onChange={(e) => setFormData({ ...formData, bookletNo: e.target.value })}
+                fullWidth
+                size="small"
+                placeholder="e.g. 01 or B-01"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <TextField
+                label="CTC / Certificate Number *"
+                value={formData.ctcNo}
+                onChange={(e) => setFormData({ ...formData, ctcNo: e.target.value })}
+                fullWidth
+                size="small"
+                required
+                placeholder="e.g. 0012345 or CCI2026-0001"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <TextField
+                label="Date of Issue *"
+                type="date"
+                value={formData.date}
+                onChange={(e) => updateFormCalculations({ date: e.target.value })}
+                fullWidth
+                size="small"
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Gender *</InputLabel>
+                <Select
+                  value={formData.gender}
+                  label="Gender *"
+                  onChange={(e) => updateFormCalculations({ gender: e.target.value as 'Male' | 'Female' })}
+                >
+                  <MenuItem value="Male">Male (₱20 Additional Tax)</MenuItem>
+                  <MenuItem value="Female">Female (₱10 Additional Tax)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
 
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-          <Card elevation={0} sx={{ border: '1px solid #e2e8f0', borderRadius: 1.5 }}>
-            <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography variant="caption" fontWeight="700" color="text.secondary" sx={{ textTransform: 'uppercase' }}>
-                  Filter Matches
-                </Typography>
-                <Box sx={{ p: 0.8, bgcolor: '#fffbeb', color: '#d97706', borderRadius: 1 }}>
-                  <Badge fontSize="small" />
-                </Box>
-              </Box>
-              <Typography variant="h5" fontWeight="800" sx={{ color: '#0f172a' }}>
-                ₱ {filteredItems.reduce((s, i) => s + (i.amount || 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            <Grid size={{ xs: 12, sm: 7 }}>
+              <TextField
+                inputRef={taxpayerRef}
+                label="Taxpayer Name *"
+                value={formData.taxpayerName}
+                onChange={(e) => setFormData({ ...formData, taxpayerName: e.target.value })}
+                fullWidth
+                size="small"
+                required
+                placeholder="Full Legal Name"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 5 }}>
+              <Autocomplete
+                options={BARANGAYS}
+                value={formData.barangay}
+                onChange={(_, val) => setFormData({ ...formData, barangay: val || 'Poblacion' })}
+                renderInput={(params) => (
+                  <TextField 
+                    {...params} 
+                    label="Barangay (Concepcion, Romblon) *" 
+                    size="small" 
+                    required 
+                  />
+                )}
+              />
+            </Grid>
+
+            <Grid size={{ xs: 12 }}>
+              <Divider sx={{ my: 1, borderColor: '#f1f5f9' }} />
+              <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1', mb: 1.5 }}>
+                Tax Computations & Breakdown
               </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {filteredItems.length} matching rows displayed
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+            </Grid>
+
+            <Grid size={{ xs: 12, sm: 2.4 }}>
+              <TextField
+                label="Basic Salary (₱)"
+                type="number"
+                value={formData.basicSalary}
+                onChange={(e) => updateFormCalculations({ basicSalary: e.target.value })}
+                fullWidth
+                size="small"
+                helperText="If changed: (Salary * 12)/1000"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 2.4 }}>
+              <TextField
+                label="Basic Community Tax (₱)"
+                type="number"
+                value={formData.basicTax}
+                onChange={(e) => updateFormCalculations({ basicTax: e.target.value })}
+                fullWidth
+                size="small"
+                helperText="₱5 Basic Tax"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 2.4 }}>
+              <TextField
+                label="Additional Tax (₱)"
+                type="number"
+                value={formData.additionalTax}
+                onChange={(e) => updateFormCalculations({ additionalTax: e.target.value })}
+                fullWidth
+                size="small"
+                helperText="Gender base or Salary/1000"
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 2.4 }}>
+              <TextField
+                label="Penalty / Surcharge (₱)"
+                type="number"
+                value={formData.penalty}
+                onChange={(e) => updateFormCalculations({ penalty: e.target.value })}
+                fullWidth
+                size="small"
+                helperText={
+                  getPenaltyRate(formData.date) > 0
+                    ? `${(getPenaltyRate(formData.date) * 100).toFixed(0)}% (2%/mo starts Mar @ 6%)`
+                    : '0% (No penalty Jan-Feb)'
+                }
+              />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 2.4 }}>
+              <TextField
+                label="Total Amount (PHP)"
+                type="number"
+                value={formData.amount}
+                onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                fullWidth
+                size="small"
+                sx={{
+                  '& .MuiInputBase-input': { fontWeight: 800, color: '#0284c7' }
+                }}
+                helperText="Basic + Additional + Penalty"
+              />
+            </Grid>
+
+            <Grid size={{ xs: 12 }}>
+              <TextField
+                label="Remarks / Particulars"
+                value={formData.remarks}
+                onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                fullWidth
+                size="small"
+                placeholder="e.g. Employed at LGU, Business owner, Farmer"
+              />
+            </Grid>
+
+            <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5, mt: 1 }}>
+              <Button 
+                variant="outlined" 
+                onClick={() => {
+                  handleResetForm();
+                  setShowForm(false);
+                }} 
+                sx={{ borderColor: '#e2e8f0', color: '#64748b' }}
+              >
+                {editingId ? 'Cancel Edit' : 'Close Form'}
+              </Button>
+              <Button 
+                variant="contained" 
+                onClick={handleSave}
+                startIcon={<Save />}
+                sx={{ bgcolor: '#0284c7', '&:hover': { bgcolor: '#0369a1' }, borderRadius: 1, px: 3 }}
+              >
+                {editingId ? 'Save Changes' : 'Save Certificate'}
+              </Button>
+            </Grid>
+          </Grid>
+        </Paper>
+      )}
 
       {/* Parsing progress */}
       {isParsing && (
@@ -799,15 +1153,15 @@ export const CommunityTaxPage: React.FC = () => {
 
           <Grid size={{ xs: 6, sm: 3, md: 2.5 }}>
             <FormControl fullWidth size="small">
-              <InputLabel>CTC Classification</InputLabel>
+              <InputLabel>Gender</InputLabel>
               <Select
-                value={filterType}
-                label="CTC Classification"
-                onChange={(e) => setFilterType(e.target.value)}
+                value={filterGender}
+                label="Gender"
+                onChange={(e) => setFilterGender(e.target.value)}
               >
-                <MenuItem value="ALL">All Classifications</MenuItem>
-                <MenuItem value="Individual">Individual (CCI)</MenuItem>
-                <MenuItem value="Corporation">Corporation (CCC)</MenuItem>
+                <MenuItem value="ALL">All Genders</MenuItem>
+                <MenuItem value="Male">Male</MenuItem>
+                <MenuItem value="Female">Female</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -840,7 +1194,7 @@ export const CommunityTaxPage: React.FC = () => {
               size="small"
               onClick={() => {
                 setSearchTerm('');
-                setFilterType('ALL');
+                setFilterGender('ALL');
                 setFilterBarangay(null);
                 setFilterDate('');
               }}
@@ -859,25 +1213,18 @@ export const CommunityTaxPage: React.FC = () => {
             <TableHead sx={{ bgcolor: '#f8fafc' }}>
               <TableRow>
                 <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Date</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Form No.</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>CTC Number</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Taxpayer Name</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Type</TableCell>
+                <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Gender</TableCell>
                 <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Barangay</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Basic</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Additional</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Penalty</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Total (PHP)</TableCell>
-                <TableCell sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Remarks</TableCell>
-                {!isAdmin && (
-                  <TableCell align="center" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Actions</TableCell>
-                )}
+                <TableCell align="right" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Total</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, color: '#475569', py: 1.5 }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filteredItems.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={isAdmin ? 11 : 12} sx={{ py: 6, textAlign: 'center', color: '#94a3b8' }}>
+                  <TableCell colSpan={7} sx={{ py: 6, textAlign: 'center', color: '#94a3b8' }}>
                     <ReceiptLong sx={{ fontSize: 44, color: '#cbd5e1', mb: 1, display: 'block', mx: 'auto' }} />
                     <Typography variant="subtitle2" fontWeight="700">No Community Tax records found</Typography>
                     <Typography variant="caption">Encode a new certificate or adjust your search filters above.</Typography>
@@ -887,75 +1234,79 @@ export const CommunityTaxPage: React.FC = () => {
                 filteredItems
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((row) => (
-                    <TableRow key={row.id} hover sx={{ '&:hover': { bgcolor: '#f8fafc' } }}>
+                    <TableRow 
+                      key={row.id} 
+                      hover 
+                      onClick={() => handleViewDetails(row)}
+                      sx={{ 
+                        cursor: 'pointer',
+                        transition: 'background-color 0.15s ease',
+                        '&:hover': { bgcolor: '#f1f5f9' } 
+                      }}
+                    >
                       <TableCell sx={{ fontSize: '0.84rem', color: '#334155', fontWeight: 500 }}>
                         {row.date}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.84rem', color: '#64748b' }}>
-                        {row.afNo || 'AF 0016'}
-                      </TableCell>
                       <TableCell sx={{ fontSize: '0.86rem', fontWeight: 700, color: '#0284c7' }}>
                         {row.ctcNo}
+                        {row.bookletNo && (
+                          <Typography variant="caption" display="block" sx={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 500 }}>
+                            Bk #{row.bookletNo}
+                          </Typography>
+                        )}
                       </TableCell>
                       <TableCell sx={{ fontSize: '0.86rem', fontWeight: 600, color: '#0f172a' }}>
                         {row.taxpayerName}
                       </TableCell>
                       <TableCell>
                         <Chip 
-                          label={row.ctcType}
+                          label={row.gender || 'Male'}
                           size="small"
                           sx={{ 
                             fontSize: '0.72rem',
                             fontWeight: 700,
                             borderRadius: 1,
-                            bgcolor: row.ctcType === 'Corporation' ? '#faf5ff' : '#f0f9ff',
-                            color: row.ctcType === 'Corporation' ? '#9333ea' : '#0284c7',
+                            bgcolor: (row.gender || 'Male') === 'Female' ? '#fdf2f8' : '#f0f9ff',
+                            color: (row.gender || 'Male') === 'Female' ? '#db2777' : '#0284c7',
                             border: '1px solid',
-                            borderColor: row.ctcType === 'Corporation' ? '#e9d5ff' : '#bae6fd'
+                            borderColor: (row.gender || 'Male') === 'Female' ? '#fbcfe8' : '#bae6fd'
                           }}
                         />
                       </TableCell>
                       <TableCell sx={{ fontSize: '0.84rem', color: '#475569' }}>
                         {row.barangay}
                       </TableCell>
-                      <TableCell align="right" sx={{ fontSize: '0.84rem', color: '#64748b' }}>
-                        ₱ {Number(row.basicTax || 0).toFixed(2)}
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontSize: '0.84rem', color: '#64748b' }}>
-                        ₱ {Number(row.additionalTax || 0).toFixed(2)}
-                      </TableCell>
-                      <TableCell align="right" sx={{ fontSize: '0.84rem', color: row.penalty ? '#ef4444' : '#64748b' }}>
-                        ₱ {Number(row.penalty || 0).toFixed(2)}
-                      </TableCell>
                       <TableCell align="right" sx={{ fontSize: '0.88rem', fontWeight: 800, color: '#0f172a' }}>
                         ₱ {Number(row.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                       </TableCell>
-                      <TableCell sx={{ fontSize: '0.80rem', color: '#64748b', maxWidth: 150 }}>
-                        {row.remarks || '-'}
+                      <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <Tooltip title={`Edit CTC #${row.ctcNo}`} arrow>
+                            <IconButton
+                              color="primary"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEdit(row);
+                              }}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={`Delete CTC #${row.ctcNo}`} arrow>
+                            <IconButton
+                              color="error"
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteClick(row);
+                              }}
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
                       </TableCell>
-                      {!isAdmin && (
-                        <TableCell align="center">
-                          <Stack direction="row" spacing={0.5} justifyContent="center">
-                            <Tooltip title="Edit Certificate" arrow>
-                              <IconButton size="small" color="primary" onClick={() => handleEdit(row)}>
-                                <Edit fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            <Tooltip title="Delete Certificate" arrow>
-                              <IconButton 
-                                size="small" 
-                                color="error" 
-                                onClick={() => {
-                                  setItemToDelete(row);
-                                  setDeleteDialogOpen(true);
-                                }}
-                              >
-                                <DeleteOutline fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Stack>
-                        </TableCell>
-                      )}
                     </TableRow>
                   ))
               )}
@@ -978,178 +1329,230 @@ export const CommunityTaxPage: React.FC = () => {
         />
       </Paper>
 
-      {/* Entry Modal Dialog */}
-      <Dialog 
-        open={dialogOpen} 
-        onClose={() => setDialogOpen(false)} 
-        maxWidth="md" 
+      {/* Complete Details Dialog */}
+      <Dialog
+        open={detailsDialogOpen}
+        onClose={() => setDetailsDialogOpen(false)}
+        maxWidth="sm"
         fullWidth
-        PaperProps={{ sx: { borderRadius: 1.5 } }}
+        PaperProps={{ sx: { borderRadius: 2 } }}
       >
-        <DialogTitle sx={{ fontWeight: 800, color: '#0f172a', borderBottom: '1px solid #e2e8f0', pb: 2 }}>
-          {editingId ? 'Edit Community Tax Certificate' : 'Issue Community Tax Certificate (Cedula)'}
-        </DialogTitle>
-        <DialogContent sx={{ pt: 3 }}>
-          <Grid container spacing={2.5} sx={{ mt: 0.5 }}>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                label="Accountable Form"
-                value={formData.afNo}
-                onChange={(e) => setFormData({ ...formData, afNo: e.target.value })}
-                fullWidth
-                size="small"
-                helperText="Standard Cedula: AF 0016"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                label="CTC / Certificate Number"
-                value={formData.ctcNo}
-                onChange={(e) => setFormData({ ...formData, ctcNo: e.target.value })}
-                fullWidth
-                size="small"
-                required
-                placeholder="e.g. 0012345 or CCI2026-0001"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField
-                label="Date of Issue"
-                type="date"
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                fullWidth
-                size="small"
-                InputLabelProps={{ shrink: true }}
-                required
-              />
-            </Grid>
+        {selectedRecord && (
+          <>
+            <DialogTitle sx={{ pb: 1.5, borderBottom: '1px solid #f1f5f9' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Box sx={{ p: 1, bgcolor: '#e0f2fe', color: '#0284c7', borderRadius: 1.5, display: 'flex' }}>
+                    <ReceiptLong fontSize="small" />
+                  </Box>
+                  <Box>
+                    <Typography variant="h6" fontWeight="800" sx={{ color: '#0f172a', fontSize: '1.1rem', lineHeight: 1.2 }}>
+                      Community Tax Details
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      CTC No. {selectedRecord.ctcNo} • {selectedRecord.afNo || 'BRF 0016'}
+                    </Typography>
+                  </Box>
+                </Box>
+                <IconButton size="small" onClick={() => setDetailsDialogOpen(false)} sx={{ color: '#94a3b8' }}>
+                  <Close fontSize="small" />
+                </IconButton>
+              </Box>
+            </DialogTitle>
 
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Classification</InputLabel>
-                <Select
-                  value={formData.ctcType}
-                  label="Classification"
-                  onChange={(e) => handleTypeChange(e.target.value as any)}
+            <DialogContent sx={{ pt: 2.5, pb: 2 }}>
+              {/* Primary Info Card */}
+              <Box sx={{ p: 2, mb: 2.5, bgcolor: '#f8fafc', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
+                <Grid container spacing={1.5}>
+                  <Grid size={{ xs: 4 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Date of Issue
+                    </Typography>
+                    <Typography variant="body2" fontWeight="700" color="#0f172a">
+                      {selectedRecord.date || '-'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid size={{ xs: 4 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Accountable Form
+                    </Typography>
+                    <Typography variant="body2" fontWeight="700" color="#0284c7">
+                      {selectedRecord.afNo || 'BRF 0016'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid size={{ xs: 4 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Booklet No.
+                    </Typography>
+                    <Typography variant="body2" fontWeight="700" color="#0f172a">
+                      {selectedRecord.bookletNo || '-'}
+                    </Typography>
+                  </Grid>
+
+                  <Grid size={{ xs: 12 }}>
+                    <Divider sx={{ my: 0.5, borderColor: '#e2e8f0' }} />
+                  </Grid>
+
+                  <Grid size={{ xs: 12 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Taxpayer Name
+                    </Typography>
+                    <Typography variant="subtitle1" fontWeight="800" color="#0f172a">
+                      {selectedRecord.taxpayerName}
+                    </Typography>
+                  </Grid>
+
+                  <Grid size={{ xs: 6 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Gender
+                    </Typography>
+                    <Chip 
+                      label={selectedRecord.gender || 'Male'}
+                      size="small"
+                      sx={{ 
+                        mt: 0.3,
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        borderRadius: 1,
+                        bgcolor: (selectedRecord.gender || 'Male') === 'Female' ? '#fdf2f8' : '#f0f9ff',
+                        color: (selectedRecord.gender || 'Male') === 'Female' ? '#db2777' : '#0284c7',
+                        border: '1px solid',
+                        borderColor: (selectedRecord.gender || 'Male') === 'Female' ? '#fbcfe8' : '#bae6fd'
+                      }}
+                    />
+                  </Grid>
+
+                  <Grid size={{ xs: 6 }}>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      Barangay
+                    </Typography>
+                    <Typography variant="body2" fontWeight="700" color="#334155">
+                      {selectedRecord.barangay}, Concepcion, Romblon
+                    </Typography>
+                  </Grid>
+
+                  {selectedRecord.remarks && (
+                    <Grid size={{ xs: 12 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Remarks / Notes
+                      </Typography>
+                      <Typography variant="body2" color="#475569" sx={{ fontStyle: 'italic' }}>
+                        {selectedRecord.remarks}
+                      </Typography>
+                    </Grid>
+                  )}
+                </Grid>
+              </Box>
+
+              {/* Financial Computation Breakdown */}
+              <Box sx={{ p: 2, bgcolor: '#ffffff', borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
+                <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1', mb: 1.5 }}>
+                  Tax Computations & Breakdown
+                </Typography>
+
+                <Stack spacing={1}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Basic Monthly Salary
+                    </Typography>
+                    <Typography variant="body2" fontWeight="600">
+                      ₱ {Number(selectedRecord.basicSalary || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Basic Community Tax
+                    </Typography>
+                    <Typography variant="body2" fontWeight="600">
+                      ₱ {Number(selectedRecord.basicTax || 0).toFixed(2)}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Additional Community Tax
+                    </Typography>
+                    <Typography variant="body2" fontWeight="600">
+                      ₱ {Number(selectedRecord.additionalTax || 0).toFixed(2)}
+                    </Typography>
+                  </Box>
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" color={selectedRecord.penalty ? 'error.main' : 'text.secondary'}>
+                      Penalty / Surcharge
+                    </Typography>
+                    <Typography variant="body2" fontWeight="600" color={selectedRecord.penalty ? 'error.main' : 'inherit'}>
+                      ₱ {Number(selectedRecord.penalty || 0).toFixed(2)}
+                    </Typography>
+                  </Box>
+
+                  <Divider sx={{ my: 1, borderColor: '#cbd5e1' }} />
+
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 0.5 }}>
+                    <Typography variant="subtitle1" fontWeight="800" color="#0f172a">
+                      Total Amount Paid
+                    </Typography>
+                    <Typography variant="h6" fontWeight="800" color="#0284c7">
+                      ₱ {Number(selectedRecord.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Box>
+            </DialogContent>
+
+            <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #f1f5f9', justifyContent: 'space-between' }}>
+              <Box>
+                {!isAdmin && (
+                  <Button
+                    color="error"
+                    variant="outlined"
+                    size="small"
+                    startIcon={<DeleteOutline />}
+                    onClick={() => {
+                      if (selectedRecord) {
+                        handleDeleteClick(selectedRecord);
+                      }
+                    }}
+                    sx={{ textTransform: 'none' }}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                {!isAdmin && (
+                  <Button
+                    variant="contained"
+                    size="small"
+                    startIcon={<Edit />}
+                    onClick={() => {
+                      setDetailsDialogOpen(false);
+                      handleEdit(selectedRecord);
+                    }}
+                    sx={{ 
+                      bgcolor: '#0284c7', 
+                      '&:hover': { bgcolor: '#0369a1' },
+                      textTransform: 'none'
+                    }}
+                  >
+                    Edit Certificate
+                  </Button>
+                )}
+                <Button 
+                  onClick={() => setDetailsDialogOpen(false)} 
+                  variant="outlined" 
+                  size="small"
+                  sx={{ borderColor: '#e2e8f0', color: '#64748b', textTransform: 'none' }}
                 >
-                  <MenuItem value="Individual">Individual (CCI)</MenuItem>
-                  <MenuItem value="Corporation">Corporation (CCC)</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid size={{ xs: 12, sm: 8 }}>
-              <TextField
-                inputRef={taxpayerRef}
-                label="Taxpayer / Corporate Entity Name"
-                value={formData.taxpayerName}
-                onChange={(e) => setFormData({ ...formData, taxpayerName: e.target.value })}
-                fullWidth
-                size="small"
-                required
-                placeholder="Full Legal Name"
-              />
-            </Grid>
-
-            <Grid size={{ xs: 12, sm: 4 }}>
-              <Autocomplete
-                options={BARANGAYS}
-                value={formData.barangay}
-                onChange={(_, val) => setFormData({ ...formData, barangay: val || 'Poblacion' })}
-                renderInput={(params) => <TextField {...params} label="Barangay" size="small" required />}
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 8 }}>
-              <TextField
-                label="Complete Address / Zone"
-                value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                fullWidth
-                size="small"
-                placeholder="Zone / Sitio / Street address"
-              />
-            </Grid>
-
-            <Grid size={{ xs: 12 }}>
-              <Divider sx={{ my: 1, borderColor: '#e2e8f0' }} />
-              <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0369a1', mb: 1.5 }}>
-                Tax Computations & Breakdown
-              </Typography>
-            </Grid>
-
-            <Grid size={{ xs: 12, sm: 3 }}>
-              <TextField
-                label="Basic Community Tax (₱)"
-                type="number"
-                value={formData.basicTax}
-                onChange={(e) => handleTaxComponentChange('basicTax', e.target.value)}
-                fullWidth
-                size="small"
-                helperText="₱5 (Ind.) or ₱500 (Corp.)"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 3 }}>
-              <TextField
-                label="Additional Tax (₱)"
-                type="number"
-                value={formData.additionalTax}
-                onChange={(e) => handleTaxComponentChange('additionalTax', e.target.value)}
-                fullWidth
-                size="small"
-                helperText="Income / property earnings"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 3 }}>
-              <TextField
-                label="Penalty / Surcharge (₱)"
-                type="number"
-                value={formData.penalty}
-                onChange={(e) => handleTaxComponentChange('penalty', e.target.value)}
-                fullWidth
-                size="small"
-                helperText="Delinquency interest if any"
-              />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 3 }}>
-              <TextField
-                label="Total Amount (PHP)"
-                type="number"
-                value={formData.amount}
-                onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                fullWidth
-                size="small"
-                sx={{
-                  '& .MuiInputBase-input': { fontWeight: 800, color: '#0284c7' }
-                }}
-                helperText="Total remittance amount"
-              />
-            </Grid>
-
-            <Grid size={{ xs: 12 }}>
-              <TextField
-                label="Remarks / Particulars"
-                value={formData.remarks}
-                onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                fullWidth
-                size="small"
-                placeholder="e.g. Employed at LGU, Sari-sari store owner, Tricycle operator"
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #e2e8f0' }}>
-          <Button onClick={() => setDialogOpen(false)} sx={{ color: '#64748b' }}>
-            Cancel
-          </Button>
-          <Button 
-            variant="contained" 
-            onClick={handleSave}
-            startIcon={<Save />}
-            sx={{ bgcolor: '#0284c7', '&:hover': { bgcolor: '#0369a1' }, borderRadius: 1 }}
-          >
-            {editingId ? 'Save Changes' : 'Save Certificate'}
-          </Button>
-        </DialogActions>
+                  Close
+                </Button>
+              </Box>
+            </DialogActions>
+          </>
+        )}
       </Dialog>
 
       {/* Import Preview Dialog */}
@@ -1172,9 +1575,10 @@ export const CommunityTaxPage: React.FC = () => {
               <TableHead sx={{ bgcolor: '#f8fafc' }}>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Booklet</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>CTC Number</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Taxpayer Name</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>Classification</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>Gender</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>Barangay</TableCell>
                   <TableCell align="right" sx={{ fontWeight: 700 }}>Amount (₱)</TableCell>
                 </TableRow>
@@ -1183,9 +1587,10 @@ export const CommunityTaxPage: React.FC = () => {
                 {importedRows.slice(0, 50).map((r, i) => (
                   <TableRow key={i}>
                     <TableCell>{r.date}</TableCell>
+                    <TableCell sx={{ color: '#64748b' }}>{r.bookletNo || '-'}</TableCell>
                     <TableCell sx={{ fontWeight: 700, color: '#0284c7' }}>{r.ctcNo}</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>{r.taxpayerName}</TableCell>
-                    <TableCell>{r.ctcType}</TableCell>
+                    <TableCell>{r.gender || 'Male'}</TableCell>
                     <TableCell>{r.barangay}</TableCell>
                     <TableCell align="right" sx={{ fontWeight: 700 }}>₱ {r.amount.toFixed(2)}</TableCell>
                   </TableRow>

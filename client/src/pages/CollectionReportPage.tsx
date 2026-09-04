@@ -233,6 +233,7 @@ export const CollectionReportPage: React.FC = () => {
     accountCode: string;
     amount: string;
   }>>([{ subCategory: '', mainCategory: '', accountCode: '', amount: '' }]);
+  const [saveAttempted, setSaveAttempted] = useState(false);
 
   const handleCloseNotification = () => {
     setNotification(prev => ({ ...prev, open: false }));
@@ -308,7 +309,7 @@ export const CollectionReportPage: React.FC = () => {
   };
 
   const toggleRow = (key: string) => {
-    setExpandedRows(prev => ({ ...prev, [key]: !prev[key] }));
+    setExpandedRows(prev => (prev[key] ? {} : { [key]: true }));
   };
 
   // ==========================================
@@ -460,8 +461,18 @@ export const CollectionReportPage: React.FC = () => {
 
       const payor = String(rawPayor ?? '').trim();
       const subCategory = String(rawSubCategory ?? '').trim();
-      const mainCategory = String(rawMainCategory ?? '').trim();
-      const accountCode = String(rawAccountCode ?? '').trim();
+      let mainCategory = String(rawMainCategory ?? '').trim();
+      let accountCode = String(rawAccountCode ?? '').trim();
+
+      if ((!mainCategory || !accountCode) && subCategory) {
+        const match = accountCodes.find(ac => ac.subCategory.toLowerCase() === subCategory.toLowerCase())
+                   || accountCodes.find(ac => ac.subCategory === subCategory);
+        if (match) {
+          if (!mainCategory) mainCategory = match.mainCategory;
+          if (!accountCode) accountCode = match.code;
+        }
+      }
+
       const remarks = String(rawRemarks ?? '').trim();
       const dateStr = formatExcelDate(rawDate);
 
@@ -583,6 +594,17 @@ export const CollectionReportPage: React.FC = () => {
 
   const handleConfirmImport = async () => {
     if (importedRows.length === 0) return;
+
+    const invalidImportRows = importedRows.filter(r => !r.mainCategory?.trim() || !r.accountCode?.trim());
+    if (invalidImportRows.length > 0) {
+      setNotification({
+        open: true,
+        message: `Cannot import: ${invalidImportRows.length} record(s) are missing Main Category or Account Code. Please ensure all records have valid categories and account codes.`,
+        severity: 'warning'
+      });
+      return;
+    }
+
     setIsImporting(true);
     setImportProgress(15);
     setImportStatusText('Preparing batch data for upload...');
@@ -671,6 +693,7 @@ export const CollectionReportPage: React.FC = () => {
   const uniqueAfNos = useMemo(() => Array.from(new Set(items.map(i => i.afNo).filter(Boolean))).sort(), [items]);
   const subCategories = useMemo(() => Array.from(new Set(accountCodes.map(c => c.subCategory))).filter(Boolean).sort(), [accountCodes]);
   const mainCategories = useMemo(() => Array.from(new Set(accountCodes.map(c => c.mainCategory))).filter(Boolean).sort(), [accountCodes]);
+  const allAccountCodes = useMemo(() => Array.from(new Set(accountCodes.map(c => c.code))).filter(Boolean).sort(), [accountCodes]);
   const uniquePayors = useMemo(() => Array.from(new Set(items.map(i => i.payor).filter(Boolean))).sort(), [items]);
 
   const accountCodeOptionsBySub = useMemo(() => {
@@ -780,6 +803,7 @@ export const CollectionReportPage: React.FC = () => {
 
   const handleCancelEdit = () => {
     setEditingGroupIds(null);
+    setSaveAttempted(false);
     setForm({
       afNo: '',
       orNo: '',
@@ -834,6 +858,7 @@ export const CollectionReportPage: React.FC = () => {
     const header = form;
 
     if (!header.afNo || !header.orNo || !header.payor) {
+      setSaveAttempted(true);
       setNotification({
         open: true,
         message: 'Please fill in AF Number, OR Number, and Payor Name.',
@@ -857,9 +882,22 @@ export const CollectionReportPage: React.FC = () => {
       });
 
     if (preparedCharges.length === 0) {
+      setSaveAttempted(true);
       setNotification({
         open: true,
         message: 'Please enter at least one charge line.',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    // Do not allow to save if there is no Main Category and account code selected
+    const hasMissingCategoryOrCode = preparedCharges.some(c => !c.mainCategory?.trim() || !c.accountCode?.trim());
+    if (hasMissingCategoryOrCode) {
+      setSaveAttempted(true);
+      setNotification({
+        open: true,
+        message: 'Cannot save: Please select a Main Category and Account Code for all charge items.',
         severity: 'warning'
       });
       return;
@@ -933,6 +971,7 @@ export const CollectionReportPage: React.FC = () => {
       setItems([...newRows.reverse(), ...items]);
       const nextOrNo = getNextOrNo(header.orNo);
 
+      setSaveAttempted(false);
       setForm({
         afNo: header.afNo,
         orNo: nextOrNo,
@@ -1314,29 +1353,6 @@ export const CollectionReportPage: React.FC = () => {
                     }
                   }}
                 />
-                
-                <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 1.5 }}>
-                  <Typography variant="body2" fontWeight="700" color="text.secondary">
-                    {editingGroupIds ? 'Update All Charges' : 'Save Entry'}
-                  </Typography>
-                  <Tooltip title={editingGroupIds ? "Update All Charges" : "Save Entry"} arrow>
-                    <IconButton 
-                      color="primary"
-                      onClick={addItem}
-                      disabled={loading}
-                      sx={{ 
-                        width: 44, 
-                        height: 44, 
-                        bgcolor: '#0284c7', 
-                        color: '#ffffff', 
-                        borderRadius: 1,
-                        '&:hover': { bgcolor: '#0369a1', color: '#ffffff' } 
-                      }}
-                    >
-                      {loading ? <CircularProgress size={22} color="inherit" /> : (editingGroupIds ? <Edit /> : <Save />)}
-                    </IconButton>
-                  </Tooltip>
-                </Box>
               </Stack>
             </Grid>
 
@@ -1360,6 +1376,11 @@ export const CollectionReportPage: React.FC = () => {
                 {charges.map((c, idx) => {
                   const subVal = c.subCategory;
                   const codesForSub = accountCodeOptionsBySub.get(subVal) || [];
+                  const codesForMain = c.mainCategory 
+                    ? Array.from(new Set(accountCodes.filter(ac => ac.mainCategory === c.mainCategory).map(ac => ac.code))).filter(Boolean).sort() 
+                    : [];
+                  const availableCodes = codesForSub.length > 0 ? codesForSub : (codesForMain.length > 0 ? codesForMain : allAccountCodes);
+
                   return (
                     <Paper 
                       key={idx} 
@@ -1382,24 +1403,26 @@ export const CollectionReportPage: React.FC = () => {
                             value={c.subCategory}
                             onChange={(_, v) => {
                               const newVal = v || '';
-                              const match = accountCodes.find(ac => ac.subCategory === newVal);
+                              const match = accountCodes.find(ac => ac.subCategory.toLowerCase() === newVal.toLowerCase())
+                                         || accountCodes.find(ac => ac.subCategory === newVal);
                               const next = [...charges];
                               next[idx] = {
                                 subCategory: newVal,
-                                mainCategory: match ? match.mainCategory : '',
-                                accountCode: match ? match.code : '',
+                                mainCategory: match ? match.mainCategory : next[idx].mainCategory,
+                                accountCode: match ? match.code : next[idx].accountCode,
                                 amount: c.amount
                               };
                               setCharges(next);
                             }}
                             onInputChange={(_, v) => {
                               const newVal = v;
-                              const match = accountCodes.find(ac => ac.subCategory === newVal);
+                              const match = accountCodes.find(ac => ac.subCategory.toLowerCase() === newVal.toLowerCase())
+                                         || accountCodes.find(ac => ac.subCategory === newVal);
                               const next = [...charges];
                               next[idx] = {
                                 subCategory: newVal,
-                                mainCategory: match ? match.mainCategory : '',
-                                accountCode: match ? match.code : '',
+                                mainCategory: match ? match.mainCategory : next[idx].mainCategory,
+                                accountCode: match ? match.code : next[idx].accountCode,
                                 amount: c.amount
                               };
                               setCharges(next);
@@ -1419,16 +1442,35 @@ export const CollectionReportPage: React.FC = () => {
                         <Grid size={{ xs: 6, sm: 3 }}>
                           <Autocomplete
                             freeSolo
-                            disabled
                             options={mainCategories}
                             value={c.mainCategory}
+                            onChange={(_, v) => {
+                              const newVal = v || '';
+                              const next = [...charges];
+                              next[idx] = {
+                                ...next[idx],
+                                mainCategory: newVal
+                              };
+                              setCharges(next);
+                            }}
+                            onInputChange={(_, v) => {
+                              const newVal = v;
+                              const next = [...charges];
+                              next[idx] = {
+                                ...next[idx],
+                                mainCategory: newVal
+                              };
+                              setCharges(next);
+                            }}
                             renderInput={(params) => (
                               <TextField 
                                 {...params} 
-                                label="Main Category" 
+                                label="Main Category *" 
                                 variant="outlined" 
                                 size="small" 
                                 fullWidth 
+                                error={saveAttempted && !c.mainCategory?.trim()}
+                                helperText={saveAttempted && !c.mainCategory?.trim() ? 'Required' : undefined}
                               />
                             )}
                           />
@@ -1436,16 +1478,43 @@ export const CollectionReportPage: React.FC = () => {
                         <Grid size={{ xs: 6, sm: 2 }}>
                           <Autocomplete
                             freeSolo
-                            disabled
-                            options={codesForSub}
+                            options={availableCodes}
                             value={c.accountCode}
+                            onChange={(_, v) => {
+                              const newVal = v || '';
+                              const match = accountCodes.find(ac => ac.code.toLowerCase() === newVal.toLowerCase())
+                                         || accountCodes.find(ac => ac.code === newVal);
+                              const next = [...charges];
+                              next[idx] = {
+                                ...next[idx],
+                                accountCode: newVal,
+                                mainCategory: next[idx].mainCategory || (match ? match.mainCategory : ''),
+                                subCategory: next[idx].subCategory || (match ? match.subCategory : '')
+                              };
+                              setCharges(next);
+                            }}
+                            onInputChange={(_, v) => {
+                              const newVal = v;
+                              const match = accountCodes.find(ac => ac.code.toLowerCase() === newVal.toLowerCase())
+                                         || accountCodes.find(ac => ac.code === newVal);
+                              const next = [...charges];
+                              next[idx] = {
+                                ...next[idx],
+                                accountCode: newVal,
+                                mainCategory: next[idx].mainCategory || (match ? match.mainCategory : ''),
+                                subCategory: next[idx].subCategory || (match ? match.subCategory : '')
+                              };
+                              setCharges(next);
+                            }}
                             renderInput={(params) => (
                               <TextField 
                                 {...params} 
-                                label="Code" 
+                                label="Code *" 
                                 variant="outlined" 
                                 size="small" 
                                 fullWidth 
+                                error={saveAttempted && !c.accountCode?.trim()}
+                                helperText={saveAttempted && !c.accountCode?.trim() ? 'Required' : undefined}
                               />
                             )}
                           />
@@ -1566,6 +1635,39 @@ export const CollectionReportPage: React.FC = () => {
                   >
                     <AddCircleOutline />
                   </IconButton>
+                </Tooltip>
+
+                <Tooltip 
+                  title={
+                    charges.some(c => !c.mainCategory?.trim() || !c.accountCode?.trim())
+                      ? "Main Category and Account Code are required to save"
+                      : (editingGroupIds ? "Update All Charges" : "Save Entry")
+                  } 
+                  arrow
+                >
+                  <Box sx={{ width: '100%', mt: 1 }}>
+                    <Button 
+                      fullWidth
+                      variant="contained"
+                      onClick={addItem}
+                      disabled={loading}
+                      startIcon={loading ? <CircularProgress size={18} color="inherit" /> : (editingGroupIds ? <Edit /> : <Save />)}
+                      sx={{ 
+                        width: '100%', 
+                        py: 0.8, 
+                        borderRadius: 1, 
+                        bgcolor: '#0284c7', 
+                        color: '#ffffff', 
+                        fontWeight: 700,
+                        fontSize: '0.88rem',
+                        textTransform: 'none',
+                        boxShadow: 'none',
+                        '&:hover': { bgcolor: '#0369a1', boxShadow: 'none' } 
+                      }}
+                    >
+                      {editingGroupIds ? 'Update All Charges' : 'Save Entry'}
+                    </Button>
+                  </Box>
                 </Tooltip>
               </Stack>
             </Grid>
@@ -1700,12 +1802,24 @@ export const CollectionReportPage: React.FC = () => {
                 const isExpanded = !!expandedRows[group.key];
                 return (
                   <React.Fragment key={group.key}>
-                    <TableRow hover sx={{ '& > *': { borderBottom: isExpanded ? 'unset' : undefined } }}>
+                    <TableRow 
+                      hover 
+                      onClick={() => toggleRow(group.key)}
+                      sx={{ 
+                        cursor: 'pointer',
+                        bgcolor: isExpanded ? '#f0f9ff' : undefined,
+                        '& > *': { borderBottom: isExpanded ? 'unset' : undefined },
+                        '&:hover': { bgcolor: isExpanded ? '#e0f2fe !important' : '#f8fafc' }
+                      }}
+                    >
                       <TableCell sx={{ width: 48 }}>
                         <Tooltip title={isExpanded ? "Hide Details" : "Show Details"} arrow>
                           <IconButton
                             size="small"
-                            onClick={() => toggleRow(group.key)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRow(group.key);
+                            }}
                             sx={{ color: '#0284c7', bgcolor: isExpanded ? '#e0f2fe' : '#f0f9ff' }}
                           >
                             {isExpanded ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
@@ -1727,16 +1841,30 @@ export const CollectionReportPage: React.FC = () => {
                       <TableCell align="right" sx={{ fontWeight: 800, color: '#0f172a', fontSize: '0.95rem' }}>
                         ₱ {group.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                         {!isAdmin ? (
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                             <Tooltip title={`Edit OR #${group.orNo} (${group.items.length} charges)`} arrow>
-                              <IconButton size="small" color="primary" onClick={() => handleEditGroup(group)}>
+                              <IconButton 
+                                size="small" 
+                                color="primary" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditGroup(group);
+                                }}
+                              >
                                 <Edit fontSize="small" />
                               </IconButton>
                             </Tooltip>
                             <Tooltip title={`Delete OR #${group.orNo}`} arrow>
-                              <IconButton size="small" color="error" onClick={() => confirmDeleteGroup(group)}>
+                              <IconButton 
+                                size="small" 
+                                color="error" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  confirmDeleteGroup(group);
+                                }}
+                              >
                                 <DeleteOutline fontSize="small" />
                               </IconButton>
                             </Tooltip>
@@ -1747,7 +1875,8 @@ export const CollectionReportPage: React.FC = () => {
                               <IconButton 
                                 size="small" 
                                 color="primary" 
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setSelectedGroup(group);
                                   setViewDialogOpen(true);
                                 }} 
@@ -1759,7 +1888,10 @@ export const CollectionReportPage: React.FC = () => {
                             <Tooltip title={isExpanded ? "Collapse Details" : "Expand Breakdown"} arrow>
                               <IconButton 
                                 size="small" 
-                                onClick={() => toggleRow(group.key)} 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleRow(group.key);
+                                }} 
                                 sx={{ bgcolor: '#f8fafc', color: '#64748b', '&:hover': { bgcolor: '#e2e8f0' } }}
                               >
                                 {isExpanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}

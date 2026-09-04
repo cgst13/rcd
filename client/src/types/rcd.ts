@@ -69,16 +69,20 @@ export interface RPTCollectionItem {
   amount: number;
   date: string;
   remarks?: string;
+  parcel?: string;
   collectorEmail?: string;
   userId?: string;
 }
 
 export interface CommunityTaxItem {
   id: number;
-  afNo: string;           // "AF 0016" or "0016"
+  afNo: string;           // "BRF 0016" or "0016"
+  bookletNo?: string;     // Booklet Number (e.g. "01", "B-01")
   ctcNo: string;          // CTC Certificate / OR Number
   taxpayerName: string;   // Full name of Individual or Corporate entity
   ctcType: 'Individual' | 'Corporation';
+  gender?: 'Male' | 'Female';
+  basicSalary?: number;
   barangay: string;
   address?: string;
   basicTax: number;       // ₱5.00 (Individual) or ₱500.00 (Corporation)

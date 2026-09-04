@@ -181,13 +181,13 @@ export const SettingsPage: React.FC = () => {
         'Collector Email': item.collectorEmail || userEmail || ''
       }));
 
-      // Format Sheet 3: Community Tax (Accountable Form 0016)
+      // Format Sheet 3: Community Tax (BRF 0016)
       const formattedCommunityTax = communityTax.map(item => ({
         'Date': item.date || '',
-        'Form No.': item.afNo || 'AF 0016',
+        'Form No.': item.afNo || 'BRF 0016',
         'CTC No.': item.ctcNo || '',
         'Taxpayer Name': item.taxpayerName || '',
-        'Classification': item.ctcType || 'Individual',
+        'Gender': item.gender || 'Male',
         'Barangay': item.barangay || '',
         'Address': item.address || '',
         'Basic Tax (PHP)': Number(item.basicTax || 0),

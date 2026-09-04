@@ -991,9 +991,16 @@ export const saveCollectionEntryBulk = async (
         remarks: header.remarks,
       }));
 
-      const { error } = await supabase
+      let { error } = await supabase
         .from('rcd_collections')
         .insert(rows);
+
+      if (error && (error.code === '23503' || error.message?.includes('user_id_fkey') || error.message?.includes('foreign key'))) {
+        console.warn('Foreign key violation on user_id in collections bulk save, retrying with user_id: null...');
+        const rowsNoUserId = rows.map(r => ({ ...r, user_id: null }));
+        const res = await supabase.from('rcd_collections').insert(rowsNoUserId);
+        error = res.error;
+      }
 
       if (error) {
         console.error('Error bulk saving collections to Supabase:', error);
@@ -1257,6 +1264,23 @@ export const updateCollectionGroup = async (
 // 5. REAL PROPERTY TAX (RPT) COLLECTIONS (Table: rcd_rpt_collections)
 // ============================================================================
 
+export interface RPTHeader {
+  af56Id: string;
+  orNumber: string;
+  payor: string;
+  date: string;
+  remarks: string;
+}
+
+export interface RPTCharge {
+  landName: string;
+  barangay: string;
+  tdNumber: string;
+  yearsPaid: string;
+  amount: number;
+  parcel: string;
+}
+
 export const getRPTCollections = async (): Promise<RPTCollectionItem[]> => {
   const user = getCurrentLocalUser();
   const isAdmin = isCurrentUserAdmin();
@@ -1313,6 +1337,7 @@ export const getRPTCollections = async (): Promise<RPTCollectionItem[]> => {
           amount: parseFloat(row.amount || 0),
           date: row.date || '',
           remarks: row.remarks || '',
+          parcel: row.parcel || '',
           collectorEmail: row.collector_email || undefined,
           userId: row.user_id || undefined,
         }));
@@ -1371,6 +1396,7 @@ export const saveRPTCollection = async (collection: RPTCollectionItem): Promise<
             td_number: collection.tdNumber,
             years_paid: collection.yearsPaid,
             amount: collection.amount,
+            parcel: collection.parcel || '',
             date: collection.date,
             remarks: collection.remarks || '',
           });
@@ -1393,6 +1419,7 @@ export const saveRPTCollection = async (collection: RPTCollectionItem): Promise<
             td_number: collection.tdNumber,
             years_paid: collection.yearsPaid,
             amount: collection.amount,
+            parcel: collection.parcel || '',
             date: collection.date,
             remarks: collection.remarks || '',
           });
@@ -1422,6 +1449,86 @@ export const saveRPTCollection = async (collection: RPTCollectionItem): Promise<
   return true;
 };
 
+export const saveRPTCollectionBulk = async (
+  header: RPTHeader,
+  charges: RPTCharge[]
+): Promise<boolean> => {
+  const user = getCurrentLocalUser();
+  const userId = isValidUuid(user?.id) ? user.id : null;
+  const collectorEmail = user?.email ? user.email.toLowerCase().trim() : null;
+
+  if (isSupabaseConfigured()) {
+    try {
+      const rows = charges.map(c => ({
+        user_id: userId,
+        collector_email: collectorEmail,
+        af56_id: header.af56Id,
+        or_number: header.orNumber,
+        payor: header.payor,
+        land_name: c.landName,
+        barangay: c.barangay,
+        td_number: c.tdNumber,
+        years_paid: c.yearsPaid,
+        amount: c.amount,
+        parcel: c.parcel || '1/1',
+        date: header.date,
+        remarks: header.remarks || '',
+      }));
+
+      let { error } = await supabase
+        .from('rcd_rpt_collections')
+        .insert(rows);
+
+      if (error && (error.code === '23503' || error.message?.includes('user_id_fkey') || error.message?.includes('foreign key'))) {
+        console.warn('Foreign key violation on user_id in RPT bulk save, retrying with user_id: null...');
+        const rowsNoUserId = rows.map(r => ({ ...r, user_id: null }));
+        const res = await supabase.from('rcd_rpt_collections').insert(rowsNoUserId);
+        error = res.error;
+      }
+
+      if (error) {
+        console.error('Error bulk saving RPT collections to Supabase:', error);
+      }
+    } catch (e) {
+      console.error('Error bulk saving RPT collections to Supabase:', e);
+    }
+  }
+
+  // Always keep local storage in sync as local cache / fallback
+  const current = JSON.parse(localStorage.getItem('rpt_collections') || '[]');
+  let nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
+  const newItems: RPTCollectionItem[] = charges.map(c => ({
+    id: nextId++,
+    af56Id: header.af56Id,
+    orNumber: header.orNumber,
+    payor: header.payor,
+    landName: c.landName,
+    barangay: c.barangay,
+    tdNumber: c.tdNumber,
+    yearsPaid: c.yearsPaid,
+    amount: c.amount,
+    parcel: c.parcel || '1/1',
+    date: header.date,
+    remarks: header.remarks,
+    collectorEmail,
+    userId,
+  }));
+
+  localStorage.setItem('rpt_collections', JSON.stringify([...newItems, ...current]));
+  return true;
+};
+
+export const updateRPTCollectionGroup = async (
+  idsToDelete: number[],
+  header: RPTHeader,
+  charges: RPTCharge[]
+): Promise<boolean> => {
+  if (idsToDelete.length > 0) {
+    await deleteRPTCollectionGroup(idsToDelete, header.af56Id, header.orNumber);
+  }
+  return saveRPTCollectionBulk(header, charges);
+};
+
 export const importRPTCollectionsBatch = async (
   entries: Array<Omit<RPTCollectionItem, 'id'>>
 ): Promise<{ success: boolean; count: number }> => {
@@ -1443,6 +1550,7 @@ export const importRPTCollectionsBatch = async (
         td_number: e.tdNumber || '',
         years_paid: e.yearsPaid || '',
         amount: Number(e.amount) || 0,
+        parcel: e.parcel || '1/1',
         date: e.date || new Date().toISOString().split('T')[0],
         remarks: e.remarks || '',
       }));
@@ -1477,6 +1585,7 @@ export const importRPTCollectionsBatch = async (
       tdNumber: e.tdNumber || '',
       yearsPaid: e.yearsPaid || '',
       amount: Number(e.amount) || 0,
+      parcel: e.parcel || '1/1',
       date: e.date || new Date().toISOString().split('T')[0],
       remarks: e.remarks || '',
       collectorEmail,
@@ -1608,7 +1717,7 @@ export const deleteRPTCollectionGroup = async (ids: number[], af56Id?: string, o
 };
 
 // ============================================================================
-// 5b. COMMUNITY TAX CERTIFICATE (AF 0016 / Cedula)
+// 5b. COMMUNITY TAX CERTIFICATE (BRF 0016 / Cedula)
 // ============================================================================
 
 export const getCommunityTaxCollections = async (): Promise<CommunityTaxItem[]> => {
@@ -1652,10 +1761,13 @@ export const getCommunityTaxCollections = async (): Promise<CommunityTaxItem[]> 
 
         remoteItems = data.map((row: any) => ({
           id: row.id,
-          afNo: row.af_no || 'AF 0016',
+          afNo: row.af_no || 'BRF 0016',
+          bookletNo: row.booklet_no || '',
           ctcNo: row.ctc_no || row.or_number || '',
           taxpayerName: row.taxpayer_name || row.payor || '',
           ctcType: row.ctc_type === 'Corporation' ? 'Corporation' : 'Individual',
+          gender: row.gender || (row.remarks?.includes('[Gender: Female]') ? 'Female' : row.remarks?.includes('[Gender: Male]') ? 'Male' : undefined),
+          basicSalary: row.basic_salary !== undefined ? Number(row.basic_salary) : (row.remarks?.match(/\[Salary:\s*([\d,.]+)\]/) ? parseFloat(row.remarks.match(/\[Salary:\s*([\d,.]+)\]/)[1]) : undefined),
           barangay: row.barangay || '',
           address: row.address || '',
           basicTax: parseFloat(row.basic_tax ?? (row.ctc_type === 'Corporation' ? 500 : 5)),
@@ -1706,50 +1818,72 @@ export const saveCommunityTaxCollection = async (item: CommunityTaxItem): Promis
 
   if (isSupabaseConfigured()) {
     try {
+      const payload: any = {
+        user_id: userId,
+        collector_email: collectorEmail,
+        af_no: item.afNo || 'BRF 0016',
+        booklet_no: item.bookletNo || '',
+        ctc_no: item.ctcNo,
+        taxpayer_name: item.taxpayerName,
+        ctc_type: item.ctcType,
+        gender: item.gender || 'Male',
+        basic_salary: item.basicSalary || 0,
+        barangay: item.barangay,
+        address: item.address || '',
+        basic_tax: item.basicTax,
+        additional_tax: item.additionalTax,
+        penalty: item.penalty || 0,
+        amount: item.amount,
+        date: item.date,
+        remarks: item.remarks || '',
+      };
+
       if (item.id && item.id > 0) {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('rcd_community_tax_collections')
-          .upsert({
-            id: item.id,
-            user_id: userId,
-            collector_email: collectorEmail,
-            af_no: item.afNo || 'AF 0016',
-            ctc_no: item.ctcNo,
-            taxpayer_name: item.taxpayerName,
-            ctc_type: item.ctcType,
-            barangay: item.barangay,
-            address: item.address || '',
-            basic_tax: item.basicTax,
-            additional_tax: item.additionalTax,
-            penalty: item.penalty || 0,
-            amount: item.amount,
-            date: item.date,
-            remarks: item.remarks || '',
-          });
-        if (!error) return true;
+          .upsert({ id: item.id, ...payload });
+
+        if (error && (error.code === '23503' || error.message?.includes('user_id_fkey') || error.message?.includes('foreign key'))) {
+          console.warn('Foreign key violation on user_id in CTC upsert, retrying with user_id: null...');
+          const retryRes = await supabase
+            .from('rcd_community_tax_collections')
+            .upsert({ id: item.id, ...payload, user_id: null });
+          error = retryRes.error;
+        }
+
+        if (error) {
+          console.error('Error upserting Community Tax to Supabase:', error);
+          if (error.code === '23505') {
+            throw new Error(`Conflict error (409): A record with CTC #${item.ctcNo} or this ID already exists. (${error.details || error.message})`);
+          }
+          throw error;
+        }
+        return true;
       } else {
-        const { error } = await supabase
+        let { error } = await supabase
           .from('rcd_community_tax_collections')
-          .insert({
-            user_id: userId,
-            collector_email: collectorEmail,
-            af_no: item.afNo || 'AF 0016',
-            ctc_no: item.ctcNo,
-            taxpayer_name: item.taxpayerName,
-            ctc_type: item.ctcType,
-            barangay: item.barangay,
-            address: item.address || '',
-            basic_tax: item.basicTax,
-            additional_tax: item.additionalTax,
-            penalty: item.penalty || 0,
-            amount: item.amount,
-            date: item.date,
-            remarks: item.remarks || '',
-          });
-        if (!error) return true;
+          .insert(payload);
+
+        if (error && (error.code === '23503' || error.message?.includes('user_id_fkey') || error.message?.includes('foreign key'))) {
+          console.warn('Foreign key violation on user_id in CTC insert, retrying with user_id: null...');
+          const retryRes = await supabase
+            .from('rcd_community_tax_collections')
+            .insert({ ...payload, user_id: null });
+          error = retryRes.error;
+        }
+
+        if (error) {
+          console.error('Error inserting Community Tax to Supabase:', error);
+          if (error.code === '23505') {
+            throw new Error(`Conflict error (409): CTC #${item.ctcNo} already exists or primary key sequence needs resync. (${error.details || error.message})`);
+          }
+          throw error;
+        }
+        return true;
       }
     } catch (e) {
       console.error('Error saving Community Tax to Supabase:', e);
+      throw e;
     }
   }
 
@@ -1808,10 +1942,13 @@ export const importCommunityTaxBatch = async (
       const rows = entries.map(e => ({
         user_id: userId,
         collector_email: collectorEmail,
-        af_no: e.afNo || 'AF 0016',
+        af_no: e.afNo || 'BRF 0016',
+        booklet_no: e.bookletNo || '',
         ctc_no: e.ctcNo || '',
         taxpayer_name: e.taxpayerName || '',
         ctc_type: e.ctcType || 'Individual',
+        gender: e.gender || 'Male',
+        basic_salary: Number(e.basicSalary) || 0,
         barangay: e.barangay || '',
         address: e.address || '',
         basic_tax: Number(e.basicTax) || 0,
@@ -1825,7 +1962,17 @@ export const importCommunityTaxBatch = async (
       const chunkSize = 500;
       for (let i = 0; i < rows.length; i += chunkSize) {
         const chunk = rows.slice(i, i + chunkSize);
-        await supabase.from('rcd_community_tax_collections').insert(chunk);
+        let { error } = await supabase.from('rcd_community_tax_collections').insert(chunk);
+        if (error && (error.code === '23503' || error.message?.includes('user_id_fkey') || error.message?.includes('foreign key'))) {
+          console.warn('Foreign key violation on user_id in CTC batch import, retrying with user_id: null...');
+          const chunkNoUserId = chunk.map(r => ({ ...r, user_id: null }));
+          const res = await supabase.from('rcd_community_tax_collections').insert(chunkNoUserId);
+          error = res.error;
+        }
+        if (error) {
+          console.error('Error importing Community Tax chunk:', error);
+          throw error;
+        }
       }
 
       return { success: true, count: entries.length };
@@ -1839,7 +1986,8 @@ export const importCommunityTaxBatch = async (
     let nextId = current.length > 0 ? Math.max(...current.map((c: any) => c.id || 0)) + 1 : 1;
     const newItems: CommunityTaxItem[] = entries.map(e => ({
       id: nextId++,
-      afNo: e.afNo || 'AF 0016',
+      afNo: e.afNo || 'BRF 0016',
+      bookletNo: e.bookletNo || '',
       ctcNo: e.ctcNo || '',
       taxpayerName: e.taxpayerName || '',
       ctcType: e.ctcType || 'Individual',

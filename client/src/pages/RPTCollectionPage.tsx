@@ -57,20 +57,38 @@ import {
   Visibility,
   AddCircleOutline,
   CloudSync,
-  Person
+  Person,
+  ReceiptLong,
+  Event,
+  Notes,
+  PersonOutline,
+  AttachMoney
 } from '@mui/icons-material';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { Notification } from '../components/Notification';
 import { useAuth } from '../context/useAuth';
 import { 
   getRPTCollections, 
-  saveRPTCollection, 
+  saveRPTCollectionBulk,
+  updateRPTCollectionGroup,
   deleteRPTCollectionGroup, 
   importRPTCollectionsBatch,
   syncPendingLocalRPTCollectionsToSupabase,
   getAllManagedUsers
 } from '../services/supabaseService';
 import type { RPTCollectionItem } from '../types/rcd';
+
+const BARANGAYS = [
+  'Bakhawan',
+  'Calabasahan',
+  'Dalajican',
+  'Masadya',
+  'Masudsud',
+  'Poblacion',
+  'Sampong',
+  'San Pedro',
+  'San Vicente'
+];
 
 export interface GroupedRPTCollection {
   key: string;
@@ -175,8 +193,6 @@ export const RPTCollectionPage: React.FC = () => {
   const [collections, setCollections] = useState<RPTCollectionItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [showEntryForm, setShowEntryForm] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [currentId, setCurrentId] = useState<number | null>(null);
 
   const [notification, setNotification] = useState<{
     open: boolean;
@@ -233,14 +249,37 @@ export const RPTCollectionPage: React.FC = () => {
     af56Id: '',
     orNumber: '',
     payor: '',
-    barangay: '',
-    landName: '',
-    tdNumber: '',
-    yearsPaid: '',
-    amount: 0,
     date: new Date().toISOString().split('T')[0],
     remarks: ''
   });
+
+  // Charges Line Items State
+  const [charges, setCharges] = useState<Array<{
+    landName: string;
+    barangay: string;
+    tdNumber: string;
+    yearsPaid: string;
+    amount: number | string;
+    parcel: string;
+  }>>([
+    { landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }
+  ]);
+
+  const [editingGroupIds, setEditingGroupIds] = useState<number[] | null>(null);
+  const landNameRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const payorRef = useRef<HTMLInputElement | null>(null);
+  const [saveAttempted, setSaveAttempted] = useState(false);
+
+  const uniquePayors = useMemo(() => {
+    return Array.from(new Set(collections.map(c => c.payor).filter(Boolean))).sort();
+  }, [collections]);
+
+  const currentEntryTotal = useMemo(() => {
+    return charges.reduce((sum, c) => {
+      const val = parseFloat(String(c.amount || '0')) || 0;
+      return sum + (isNaN(val) ? 0 : val);
+    }, 0);
+  }, [charges]);
 
   const handleCloseNotification = () => {
     setNotification(prev => ({ ...prev, open: false }));
@@ -308,7 +347,7 @@ export const RPTCollectionPage: React.FC = () => {
   }, []);
 
   const toggleRow = (key: string) => {
-    setExpandedRows(prev => ({ ...prev, [key]: !prev[key] }));
+    setExpandedRows(prev => (prev[key] ? {} : { [key]: true }));
   };
 
   const handleOpen = () => {
@@ -321,36 +360,47 @@ export const RPTCollectionPage: React.FC = () => {
       af56Id: latestAf56,
       orNumber: nextOr,
       payor: '',
-      barangay: '',
-      landName: '',
-      tdNumber: '',
-      yearsPaid: '',
-      amount: 0,
       date: prevDate,
       remarks: ''
     });
-    setIsEditing(false);
-    setCurrentId(null);
+    setCharges([
+      { landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }
+    ]);
+    setEditingGroupIds(null);
+    setSaveAttempted(false);
     setShowEntryForm(true);
+    setTimeout(() => {
+      payorRef.current?.focus();
+    }, 150);
   };
 
   const handleEditGroup = (group: GroupedRPTCollection) => {
-    const primary = group.items[0];
     setFormData({
       af56Id: group.af56Id || '',
       orNumber: group.orNumber || '',
       payor: group.payor || '',
-      barangay: primary?.barangay || group.barangay || '',
-      landName: primary?.landName || group.landName || '',
-      tdNumber: primary?.tdNumber || group.tdNumber || '',
-      yearsPaid: primary?.yearsPaid || group.yearsPaid || '',
-      amount: group.totalAmount || 0,
       date: group.date || new Date().toISOString().split('T')[0],
       remarks: group.remarks || ''
     });
-    setIsEditing(true);
-    setCurrentId(primary?.id || null);
+
+    const groupCharges = group.items.map(item => ({
+      landName: item.landName || '',
+      barangay: item.barangay || group.barangay || '',
+      tdNumber: item.tdNumber || '',
+      yearsPaid: item.yearsPaid || '',
+      amount: item.amount !== undefined ? item.amount : '',
+      parcel: item.parcel || '1/1'
+    }));
+
+    setCharges(
+      groupCharges.length > 0
+        ? groupCharges
+        : [{ landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }]
+    );
+    setEditingGroupIds(group.itemIds);
+    setSaveAttempted(false);
     setShowEntryForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancelEdit = () => {
@@ -363,51 +413,117 @@ export const RPTCollectionPage: React.FC = () => {
       af56Id: latestAf56,
       orNumber: nextOr,
       payor: '',
-      barangay: '',
-      landName: '',
-      tdNumber: '',
-      yearsPaid: '',
-      amount: 0,
       date: prevDate,
       remarks: ''
     });
+    setCharges([
+      { landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }
+    ]);
     setShowEntryForm(false);
-    setIsEditing(false);
-    setCurrentId(null);
+    setEditingGroupIds(null);
+    setSaveAttempted(false);
   };
 
   const handleSave = async () => {
+    setSaveAttempted(true);
+
+    if (!formData.orNumber?.trim() || !formData.payor?.trim()) {
+      setNotification({
+        open: true,
+        message: 'Please fill in Official Receipt No. and Payor Name.',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    if (charges.length === 0) {
+      setNotification({
+        open: true,
+        message: 'Please enter at least one charge line.',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    // All fields in Charges Line Items are strictly required
+    const hasMissingField = charges.some(c => 
+      !c.landName?.trim() || 
+      !c.barangay?.trim() || 
+      !c.tdNumber?.trim() || 
+      !c.yearsPaid?.trim() || 
+      !c.parcel?.trim() || 
+      c.amount === '' || 
+      isNaN(Number(c.amount)) || 
+      Number(c.amount) <= 0
+    );
+
+    if (hasMissingField) {
+      setNotification({
+        open: true,
+        message: 'All fields in Charges Line Items are required (Land Name, Barangay, TD #, Years Paid, Parcel, and positive Amount).',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    const preparedCharges = charges.map(c => ({
+      landName: c.landName.trim(),
+      barangay: c.barangay.trim(),
+      tdNumber: c.tdNumber.trim(),
+      yearsPaid: c.yearsPaid.trim(),
+      amount: Number(c.amount),
+      parcel: c.parcel.trim() || '1/1'
+    }));
+
     setLoading(true);
     try {
-      const itemToSave: RPTCollectionItem = {
-        id: isEditing && currentId ? currentId : 0,
-        ...formData
-      };
-
-      const success = await saveRPTCollection(itemToSave);
-      if (success) {
-        await loadCollections();
-        setShowEntryForm(false);
-        const nextOr = getNextOrNumber(itemToSave.orNumber);
-        const prevDate = itemToSave.date || new Date().toISOString().split('T')[0];
-        const latestAf56 = itemToSave.af56Id || collections.find(item => item.af56Id && item.af56Id.trim() !== '')?.af56Id || formData.af56Id || '';
-        setFormData({
-          af56Id: latestAf56,
-          orNumber: nextOr,
-          payor: '',
-          barangay: '',
-          landName: '',
-          tdNumber: '',
-          yearsPaid: '',
-          amount: 0,
-          date: prevDate,
-          remarks: ''
-        });
-        setNotification({
-          open: true,
-          message: isEditing ? 'RPT collection updated successfully.' : 'RPT collection saved successfully.',
-          severity: 'success'
-        });
+      if (editingGroupIds && editingGroupIds.length > 0) {
+        const success = await updateRPTCollectionGroup(editingGroupIds, formData, preparedCharges);
+        if (success) {
+          await loadCollections();
+          handleCancelEdit();
+          setNotification({
+            open: true,
+            message: `OR #${formData.orNumber} updated successfully!`,
+            severity: 'success'
+          });
+        } else {
+          setNotification({
+            open: true,
+            message: 'Failed to update RPT entries.',
+            severity: 'error'
+          });
+        }
+      } else {
+        const success = await saveRPTCollectionBulk(formData, preparedCharges);
+        if (success) {
+          await loadCollections();
+          const nextOr = getNextOrNumber(formData.orNumber);
+          setSaveAttempted(false);
+          setFormData(prev => ({
+            ...prev,
+            orNumber: nextOr,
+            payor: '',
+            remarks: ''
+          }));
+          setCharges([
+            { landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }
+          ]);
+          setNotification({
+            open: true,
+            message: `OR #${formData.orNumber} with ${preparedCharges.length} charge line(s) saved successfully.`,
+            severity: 'success'
+          });
+          setTimeout(() => {
+            payorRef.current?.focus();
+          }, 100);
+        } else {
+          setNotification({
+            open: true,
+            message: 'Failed to save RPT entries.',
+            severity: 'error'
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to save collection', error);
@@ -515,6 +631,7 @@ export const RPTCollectionPage: React.FC = () => {
       tdNumber?: number;
       yearsPaid?: number;
       amount?: number;
+      parcel?: number;
       date?: number;
       remarks?: number;
     } = {};
@@ -542,6 +659,8 @@ export const RPTCollectionPage: React.FC = () => {
           colMap.yearsPaid = idx;
         } else if (colMap.amount === undefined && (n.includes('amount') || n.includes('amt') || n === 'total' || n.includes('value') || n.includes('collected') || n.includes('taxpaid'))) {
           colMap.amount = idx;
+        } else if (colMap.parcel === undefined && (n.includes('parcel') || n.includes('fraction') || n.includes('portion') || n.includes('lot'))) {
+          colMap.parcel = idx;
         } else if (colMap.date === undefined && (n.includes('date') || n.includes('txdate') || n.includes('paymentdate'))) {
           colMap.date = idx;
         } else if (colMap.remarks === undefined && (n.includes('remark') || n.includes('note') || n.includes('memo') || n.includes('desc'))) {
@@ -550,7 +669,7 @@ export const RPTCollectionPage: React.FC = () => {
       });
       startDataRow = headerRowIdx + 1;
     } else {
-      // Default Fallback (matches image order: AF56 ID, OR Number, Payor, Barangay, Land Name, TD Number, Years Paid, Amount, Date, Remarks)
+      // Default Fallback
       colMap.af56Id = 0;
       colMap.orNumber = 1;
       colMap.payor = 2;
@@ -558,9 +677,10 @@ export const RPTCollectionPage: React.FC = () => {
       colMap.landName = 4;
       colMap.tdNumber = 5;
       colMap.yearsPaid = 6;
-      colMap.amount = 7;
-      colMap.date = 8;
-      colMap.remarks = 9;
+      colMap.parcel = 7;
+      colMap.amount = 8;
+      colMap.date = 9;
+      colMap.remarks = 10;
       startDataRow = 0;
     }
 
@@ -578,6 +698,7 @@ export const RPTCollectionPage: React.FC = () => {
       const rawTd = colMap.tdNumber !== undefined ? String(row[colMap.tdNumber] || '').trim() : '';
       const rawYears = colMap.yearsPaid !== undefined ? String(row[colMap.yearsPaid] || '').trim() : '';
       const rawAmount = colMap.amount !== undefined ? row[colMap.amount] : 0;
+      const rawParcel = colMap.parcel !== undefined ? String(row[colMap.parcel] || '').trim() : '';
       const rawDate = colMap.date !== undefined ? row[colMap.date] : '';
       const rawRemarks = colMap.remarks !== undefined ? String(row[colMap.remarks] || '').trim() : '';
 
@@ -599,6 +720,7 @@ export const RPTCollectionPage: React.FC = () => {
         tdNumber: rawTd,
         yearsPaid: rawYears || new Date().getFullYear().toString(),
         amount: parsedAmount,
+        parcel: rawParcel,
         date: cleanDate,
         remarks: rawRemarks
       });
@@ -623,83 +745,65 @@ export const RPTCollectionPage: React.FC = () => {
 
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-
+        const sheetList = workbook.SheetNames;
         setCurrentWorkbook(workbook);
-        setSheetNames(workbook.SheetNames);
+        setSheetNames(sheetList);
+        setSelectedSheet(sheetList[0]);
 
-        if (workbook.SheetNames.length > 0) {
-          const firstSheet = workbook.SheetNames[0];
-          setSelectedSheet(firstSheet);
+        const firstSheet = workbook.Sheets[sheetList[0]];
+        const parsedRows = parseRptSheetData(firstSheet);
+        setImportedRows(parsedRows);
+        setPreviewPage(0);
 
-          setParseProgress(80);
-          setParseStatusText('Extracting records from sheet: ' + firstSheet);
-
-          const worksheet = workbook.Sheets[firstSheet];
-          const parsed = parseRptSheetData(worksheet);
-
-          setTimeout(() => {
-            setImportedRows(parsed);
-            setIsParsing(false);
-            setParseProgress(100);
-            setImportPreviewOpen(true);
-            setPreviewPage(0);
-          }, 300);
-        } else {
+        setParseProgress(100);
+        setParseStatusText('Done parsing!');
+        setTimeout(() => {
           setIsParsing(false);
-          setNotification({
-            open: true,
-            message: 'No sheets found in the uploaded workbook.',
-            severity: 'warning'
-          });
-        }
+          setImportPreviewOpen(true);
+        }, 300);
       } catch (err) {
-        console.error('Error parsing Excel', err);
+        console.error('Error reading workbook', err);
         setIsParsing(false);
         setNotification({
           open: true,
-          message: 'Error reading Excel file. Please ensure it is a valid .xlsx or .xls file.',
+          message: 'Failed to parse Excel file. Please ensure it is a valid .xlsx or .xls file.',
           severity: 'error'
         });
       }
     };
-
     reader.readAsArrayBuffer(file);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleSheetChange = (newSheetName: string) => {
-    setSelectedSheet(newSheetName);
-    if (currentWorkbook && currentWorkbook.Sheets[newSheetName]) {
-      const parsed = parseRptSheetData(currentWorkbook.Sheets[newSheetName]);
-      setImportedRows(parsed);
-      setPreviewPage(0);
-    }
+  const handleSheetChange = (sheetName: string) => {
+    if (!currentWorkbook) return;
+    setSelectedSheet(sheetName);
+    const worksheet = currentWorkbook.Sheets[sheetName];
+    const parsedRows = parseRptSheetData(worksheet);
+    setImportedRows(parsedRows);
+    setPreviewPage(0);
   };
 
   const handleConfirmImport = async () => {
     if (importedRows.length === 0) return;
-
     setIsImporting(true);
-    setImportProgress(20);
-    setImportStatusText(`Preparing ${importedRows.length} records for database batch insert...`);
+    setImportProgress(25);
+    setImportStatusText('Saving records to database...');
 
     try {
-      setImportProgress(60);
-      setImportStatusText('Saving Real Property Tax collections to Supabase...');
-
       const result = await importRPTCollectionsBatch(importedRows);
 
-      setImportProgress(100);
-      setImportStatusText('Import complete!');
+      setImportProgress(80);
+      setImportStatusText('Finalizing import...');
 
-      setTimeout(async () => {
+      await loadCollections();
+
+      setImportProgress(100);
+      setTimeout(() => {
         setIsImporting(false);
         setImportPreviewOpen(false);
-        await loadCollections();
-
-        const totalImportedAmt = importedRows.reduce((sum, r) => sum + (r.amount || 0), 0);
+        setImportedRows([]);
+        const totalImportedAmt = importedRows.reduce((s, r) => s + (r.amount || 0), 0);
         setNotification({
           open: true,
           message: `Successfully imported ${result.count} RPT collection records totaling ₱${totalImportedAmt.toLocaleString('en-PH', { minimumFractionDigits: 2 })}!`,
@@ -727,6 +831,7 @@ export const RPTCollectionPage: React.FC = () => {
         'Land Name': 'LOT 123-A RESIDENTIAL',
         'TD Number': 'TD-04-001-00234',
         'Years Paid': '2024',
+        'Parcel (Fraction)': '1/2',
         'Amount': 1500.00,
         'Date': new Date().toISOString().split('T')[0],
         'Remarks': 'Full Payment (50% Basic / 50% SEF)'
@@ -739,6 +844,7 @@ export const RPTCollectionPage: React.FC = () => {
         'Land Name': 'COMMERCIAL BLDG 2',
         'TD Number': 'TD-04-002-00567',
         'Years Paid': '2023-2024',
+        'Parcel (Fraction)': 'Whole',
         'Amount': 3200.50,
         'Date': new Date().toISOString().split('T')[0],
         'Remarks': 'With 10% Early Discount'
@@ -758,6 +864,7 @@ export const RPTCollectionPage: React.FC = () => {
       { wch: 25 }, // Land Name
       { wch: 20 }, // TD Number
       { wch: 14 }, // Years Paid
+      { wch: 18 }, // Parcel (Fraction)
       { wch: 14 }, // Amount
       { wch: 14 }, // Date
       { wch: 35 }  // Remarks
@@ -996,12 +1103,12 @@ export const RPTCollectionPage: React.FC = () => {
       {showEntryForm && (
         <Card elevation={0} sx={{ mb: 3, borderRadius: 1.5, border: '1px solid #e2e8f0' }}>
           <CardHeader
-            title={isEditing ? "Edit RPT Collection Entry" : "New RPT Collection Entry"}
-            subheader="Enter the Real Property Tax (AF 56) payment details below."
+            title={editingGroupIds ? `Edit RPT Collection OR #${formData.orNumber}` : "New RPT Collection Entry"}
+            subheader={editingGroupIds ? "Update details and charge line items for this receipt." : "Enter the Real Property Tax (AF 56) payment details below."}
             titleTypographyProps={{ variant: 'h6', fontWeight: '800', color: '#0f172a' }}
             action={
               <Tooltip title="Close Form" arrow>
-                <IconButton onClick={handleCancelEdit} sx={{ bgcolor: '#f1f5f9', color: '#64748b', borderRadius: 1 }}>
+                <IconButton onClick={editingGroupIds ? handleCancelEdit : () => setShowEntryForm(false)} sx={{ bgcolor: '#f1f5f9', color: '#64748b', borderRadius: 1 }}>
                   <Clear />
                 </IconButton>
               </Tooltip>
@@ -1009,143 +1116,434 @@ export const RPTCollectionPage: React.FC = () => {
             sx={{ bgcolor: '#f8fafc', borderBottom: '1px solid #e2e8f0', p: 2.5 }}
           />
           <CardContent sx={{ p: 3 }}>
-            <Grid container spacing={2.5}>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                <TextField
-                  fullWidth
-                  label="AF56 ID / Batch"
-                  size="small"
-                  value={formData.af56Id}
-                  onChange={(e) => setFormData({ ...formData, af56Id: e.target.value })}
-                  placeholder="e.g. AF56-2024-001"
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                <TextField
-                  fullWidth
-                  label="Official Receipt No."
-                  size="small"
-                  value={formData.orNumber}
-                  onChange={(e) => setFormData({ ...formData, orNumber: e.target.value })}
-                  placeholder="e.g. 12345678"
-                  helperText={!isEditing ? "Auto-numbered from previous record" : undefined}
-                  required
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-                <TextField
-                  fullWidth
-                  label="Date"
-                  type="date"
-                  size="small"
-                  InputLabelProps={{ shrink: true }}
-                  value={formData.date}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  helperText={!isEditing ? "Inherited from previous record" : undefined}
-                  required
-                />
+            <Grid container spacing={4}>
+              {/* Left Column: Transaction Details */}
+              <Grid size={{ xs: 12, md: 4 }}>
+                <Typography variant="subtitle2" color="primary" sx={{ mb: 2, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 }}>
+                  Transaction Details
+                </Typography>
+
+                <Stack spacing={2}>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <TextField
+                      label="AF56 ID / Batch"
+                      fullWidth
+                      size="small"
+                      value={formData.af56Id}
+                      onChange={(e) => setFormData({ ...formData, af56Id: e.target.value })}
+                      placeholder="e.g. AF56-2024-001"
+                      slotProps={{
+                        input: {
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <ReceiptLong fontSize="small" color="action" />
+                            </InputAdornment>
+                          ),
+                        }
+                      }}
+                    />
+                    <TextField
+                      label="Official Receipt No. *"
+                      fullWidth
+                      size="small"
+                      value={formData.orNumber}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val.length <= 8) {
+                          setFormData({ ...formData, orNumber: val });
+                        }
+                      }}
+                      onBlur={() => {
+                        if (formData.orNumber && /^\d+$/.test(formData.orNumber)) {
+                          setFormData({ ...formData, orNumber: formData.orNumber.padStart(8, '0') });
+                        }
+                      }}
+                      placeholder="e.g. 02079482"
+                      required
+                      slotProps={{
+                        input: {
+                          startAdornment: (
+                            <InputAdornment position="start">
+                              <Typography variant="caption" color="text.secondary">#</Typography>
+                            </InputAdornment>
+                          ),
+                        }
+                      }}
+                    />
+                  </Box>
+
+                  <Autocomplete
+                    freeSolo
+                    options={uniquePayors}
+                    value={formData.payor}
+                    onChange={(_, newValue) => {
+                      setFormData({ ...formData, payor: newValue || '' });
+                    }}
+                    onInputChange={(_, newInputValue) => {
+                      setFormData({ ...formData, payor: newInputValue });
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Payor Name *"
+                        fullWidth
+                        size="small"
+                        placeholder="Taxpayer Full Name"
+                        required
+                        error={saveAttempted && !formData.payor?.trim()}
+                        helperText={saveAttempted && !formData.payor?.trim() ? 'Required' : undefined}
+                        inputRef={(node) => {
+                          if (payorRef) {
+                            payorRef.current = node;
+                          }
+                          const { ref } = (params.InputProps as any) || {};
+                          if (ref) {
+                            if (typeof ref === 'function') ref(node);
+                            else ref.current = node;
+                          }
+                        }}
+                        slotProps={{
+                          input: {
+                            ...params.InputProps,
+                            startAdornment: (
+                              <>
+                                <InputAdornment position="start">
+                                  <PersonOutline fontSize="small" color="action" />
+                                </InputAdornment>
+                                {params.InputProps.startAdornment}
+                              </>
+                            ),
+                          }
+                        }}
+                      />
+                    )}
+                  />
+
+                  <TextField
+                    type="date"
+                    label="Transaction Date *"
+                    fullWidth
+                    size="small"
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    InputLabelProps={{ shrink: true }}
+                    required
+                    slotProps={{
+                      input: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Event fontSize="small" color="action" />
+                          </InputAdornment>
+                        ),
+                      }
+                    }}
+                  />
+
+                  <TextField
+                    label="Remarks"
+                    fullWidth
+                    multiline
+                    rows={3}
+                    size="small"
+                    value={formData.remarks}
+                    onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                    placeholder="Additional transaction notes..."
+                    slotProps={{
+                      input: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Notes fontSize="small" color="action" />
+                          </InputAdornment>
+                        ),
+                      }
+                    }}
+                  />
+                </Stack>
               </Grid>
 
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Payor Name"
-                  size="small"
-                  value={formData.payor}
-                  onChange={(e) => setFormData({ ...formData, payor: e.target.value })}
-                  placeholder="Taxpayer Full Name"
-                  required
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 6 }}>
-                <TextField
-                  fullWidth
-                  label="Barangay"
-                  size="small"
-                  value={formData.barangay}
-                  onChange={(e) => setFormData({ ...formData, barangay: e.target.value })}
-                  placeholder="Barangay Location"
-                />
-              </Grid>
+              {/* Right Column: Charges Line Items */}
+              <Grid size={{ xs: 12, md: 8 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="subtitle2" color="primary" sx={{ fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 }}>
+                    Charges Line Items
+                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight="600">
+                      {charges.length} item{charges.length !== 1 ? 's' : ''}
+                    </Typography>
+                    <Typography variant="subtitle2" fontWeight="800" sx={{ color: '#0284c7' }}>
+                      Total: ₱ {currentEntryTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </Typography>
+                  </Box>
+                </Box>
 
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  label="Land Name / Declared Owner"
-                  size="small"
-                  value={formData.landName}
-                  onChange={(e) => setFormData({ ...formData, landName: e.target.value })}
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  label="Tax Declaration (TD) No."
-                  size="small"
-                  value={formData.tdNumber}
-                  onChange={(e) => setFormData({ ...formData, tdNumber: e.target.value })}
-                  placeholder="e.g. TD-2024-001"
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  label="Years Paid"
-                  size="small"
-                  value={formData.yearsPaid}
-                  onChange={(e) => setFormData({ ...formData, yearsPaid: e.target.value })}
-                  placeholder="e.g. 2023-2024"
-                />
-              </Grid>
-
-              <Grid size={{ xs: 12, sm: 4 }}>
-                <TextField
-                  fullWidth
-                  label="Amount (PHP)"
-                  type="number"
-                  size="small"
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
-                  slotProps={{
-                    input: {
-                      startAdornment: <InputAdornment position="start">₱</InputAdornment>,
-                    }
-                  }}
-                  required
-                />
-              </Grid>
-              <Grid size={{ xs: 12, sm: 8 }}>
-                <TextField
-                  fullWidth
-                  label="Remarks"
-                  size="small"
-                  value={formData.remarks}
-                  onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                  placeholder="Additional notes..."
-                />
-              </Grid>
-              <Grid size={{ xs: 12 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5, mt: 1 }}>
-                  <Tooltip title="Cancel Edit" arrow>
-                    <IconButton onClick={handleCancelEdit} sx={{ bgcolor: '#f1f5f9', color: '#64748b' }}>
-                      <Clear />
-                    </IconButton>
-                  </Tooltip>
-                  <Tooltip title={isEditing ? 'Update Entry' : 'Save Entry'} arrow>
-                    <IconButton
-                      onClick={handleSave}
-                      disabled={loading || !formData.orNumber || !formData.payor || isNaN(formData.amount) || formData.amount < 0}
+                <Stack spacing={1.5}>
+                  {charges.map((c, idx) => (
+                    <Paper
+                      key={idx}
+                      variant="outlined"
                       sx={{
-                        bgcolor: '#0284c7',
-                        color: '#ffffff',
-                        boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)',
-                        '&:hover': { bgcolor: '#0369a1', color: '#ffffff' }
+                        p: 1.5,
+                        bgcolor: '#f8fafc',
+                        borderRadius: 1,
+                        borderColor: '#e2e8f0',
+                        position: 'relative',
+                        transition: 'background-color 0.2s',
+                        '&:hover': { bgcolor: '#f0f9ff' }
                       }}
                     >
-                      {isEditing ? <Edit /> : <Save />}
+                      <Grid container spacing={1} alignItems="center">
+                        {/* Row 1: Land Name & Barangay */}
+                        <Grid size={{ xs: 12, sm: 6 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Land Name / Declared Owner *"
+                            required
+                            error={saveAttempted && !c.landName?.trim()}
+                            helperText={saveAttempted && !c.landName?.trim() ? 'Required' : undefined}
+                            value={c.landName}
+                            inputRef={(el) => (landNameRefs.current[idx] = el)}
+                            onChange={(e) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], landName: e.target.value };
+                              setCharges(next);
+                            }}
+                            placeholder="e.g. Lot 123-A / Owner Name"
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 12, sm: 6 }}>
+                          <Autocomplete
+                            freeSolo
+                            options={BARANGAYS}
+                            value={c.barangay}
+                            onChange={(_, v) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], barangay: v || '' };
+                              setCharges(next);
+                            }}
+                            onInputChange={(_, v) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], barangay: v };
+                              setCharges(next);
+                            }}
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                label="Barangay *"
+                                required
+                                error={saveAttempted && !c.barangay?.trim()}
+                                helperText={saveAttempted && !c.barangay?.trim() ? 'Required' : undefined}
+                                size="small"
+                                fullWidth
+                                placeholder="Select or type barangay"
+                              />
+                            )}
+                          />
+                        </Grid>
+
+                        {/* Row 2: TD #, Years Paid, Parcel (Fraction), Amount, Remove */}
+                        <Grid size={{ xs: 12, sm: 4 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Tax Declaration (TD) No. *"
+                            required
+                            error={saveAttempted && !c.tdNumber?.trim()}
+                            helperText={saveAttempted && !c.tdNumber?.trim() ? 'Required' : undefined}
+                            value={c.tdNumber}
+                            onChange={(e) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], tdNumber: e.target.value };
+                              setCharges(next);
+                            }}
+                            placeholder="e.g. TD-2024-001"
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 6, sm: 2 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Years Paid *"
+                            required
+                            error={saveAttempted && !c.yearsPaid?.trim()}
+                            helperText={saveAttempted && !c.yearsPaid?.trim() ? 'Required' : undefined}
+                            value={c.yearsPaid}
+                            onChange={(e) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], yearsPaid: e.target.value };
+                              setCharges(next);
+                            }}
+                            placeholder="e.g. 2024"
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 6, sm: 2 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Parcel (Fraction) *"
+                            required
+                            error={saveAttempted && !c.parcel?.trim()}
+                            helperText={saveAttempted && !c.parcel?.trim() ? 'Required' : undefined}
+                            value={c.parcel}
+                            onChange={(e) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], parcel: e.target.value };
+                              setCharges(next);
+                            }}
+                            placeholder="e.g. 1/1, 1/2"
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 10, sm: 3 }}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            label="Amount (PHP) *"
+                            required
+                            error={saveAttempted && (c.amount === '' || isNaN(Number(c.amount)) || Number(c.amount) <= 0)}
+                            helperText={saveAttempted && (c.amount === '' || isNaN(Number(c.amount)) || Number(c.amount) <= 0) ? 'Required (>0)' : undefined}
+                            value={c.amount}
+                            onChange={(e) => {
+                              const next = [...charges];
+                              next[idx] = { ...next[idx], amount: e.target.value };
+                              setCharges(next);
+                            }}
+                            onBlur={() => {
+                              const val = String(c.amount || '');
+                              if (val && val.trim().startsWith('=')) {
+                                try {
+                                  const expression = val.trim().substring(1).replace(/\s+/g, '');
+                                  const parts = expression.split(/([+\-])/);
+                                  let sum = parseFloat(parts[0]) || 0;
+                                  for (let i = 1; i < parts.length; i += 2) {
+                                    const operator = parts[i];
+                                    const operand = parseFloat(parts[i + 1]) || 0;
+                                    if (operator === '+') sum += operand;
+                                    if (operator === '-') sum -= operand;
+                                  }
+                                  const next = [...charges];
+                                  next[idx] = { ...next[idx], amount: String(sum) };
+                                  setCharges(next);
+                                } catch (err) {
+                                  console.error(err);
+                                }
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                const val = String(c.amount || '');
+                                if (val && val.trim().startsWith('=')) {
+                                  e.preventDefault();
+                                  try {
+                                    const expression = val.trim().substring(1).replace(/\s+/g, '');
+                                    const parts = expression.split(/([+\-])/);
+                                    let sum = parseFloat(parts[0]) || 0;
+                                    for (let i = 1; i < parts.length; i += 2) {
+                                      const operator = parts[i];
+                                      const operand = parseFloat(parts[i + 1]) || 0;
+                                      if (operator === '+') sum += operand;
+                                      if (operator === '-') sum -= operand;
+                                    }
+                                    const next = [...charges];
+                                    next[idx] = { ...next[idx], amount: String(sum) };
+                                    setCharges(next);
+                                  } catch (err) {
+                                    console.error(err);
+                                  }
+                                }
+                              }
+                            }}
+                            slotProps={{
+                              input: {
+                                startAdornment: (
+                                  <InputAdornment position="start">
+                                    <AttachMoney fontSize="small" />
+                                  </InputAdornment>
+                                ),
+                              }
+                            }}
+                          />
+                        </Grid>
+                        <Grid size={{ xs: 2, sm: 1 }} sx={{ display: 'flex', justifyContent: 'center' }}>
+                          <Tooltip title="Remove Charge Line">
+                            <IconButton
+                              color="error"
+                              size="small"
+                              tabIndex={-1}
+                              onClick={() => {
+                                const next = charges.filter((_, i) => i !== idx);
+                                setCharges(next.length > 0 ? next : [{ landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }]);
+                              }}
+                            >
+                              <DeleteOutline fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Grid>
+                      </Grid>
+                    </Paper>
+                  ))}
+
+                  {/* Add Another Charge Line Button */}
+                  <Tooltip title="Add Another Charge Line" arrow>
+                    <IconButton
+                      color="primary"
+                      onClick={() => {
+                        const newIdx = charges.length;
+                        setCharges([...charges, { landName: '', barangay: '', tdNumber: '', yearsPaid: '', amount: '', parcel: '1/1' }]);
+                        setTimeout(() => {
+                          const el = landNameRefs.current[newIdx];
+                          if (el) el.focus();
+                        }, 100);
+                      }}
+                      sx={{
+                        width: '100%',
+                        border: '1px dashed #38bdf8',
+                        borderRadius: 1,
+                        bgcolor: '#f0f9ff',
+                        color: '#0284c7',
+                        py: 0.8,
+                        mt: 1,
+                        '&:hover': { bgcolor: '#e0f2fe' }
+                      }}
+                    >
+                      <AddCircleOutline />
                     </IconButton>
                   </Tooltip>
-                </Box>
+
+                  {/* Save Entry Button (directly below add charge line button, identical size) */}
+                  <Tooltip
+                    title={
+                      !formData.orNumber || !formData.payor
+                        ? "Official Receipt No. and Payor Name are required"
+                        : (editingGroupIds ? "Update All Charges" : "Save Entry")
+                    }
+                    arrow
+                  >
+                    <Box sx={{ width: '100%', mt: 1 }}>
+                      <Button
+                        fullWidth
+                        variant="contained"
+                        onClick={handleSave}
+                        disabled={loading || !formData.orNumber || !formData.payor}
+                        startIcon={loading ? <CircularProgress size={18} color="inherit" /> : (editingGroupIds ? <Edit /> : <Save />)}
+                        sx={{
+                          width: '100%',
+                          py: 0.8,
+                          borderRadius: 1,
+                          bgcolor: '#0284c7',
+                          color: '#ffffff',
+                          fontWeight: 'bold',
+                          fontSize: '0.95rem',
+                          textTransform: 'none',
+                          boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)',
+                          '&:hover': { bgcolor: '#0369a1' }
+                        }}
+                      >
+                        {editingGroupIds ? "Update Entry" : "Save Entry"}
+                      </Button>
+                    </Box>
+                  </Tooltip>
+                </Stack>
               </Grid>
             </Grid>
           </CardContent>
@@ -1281,12 +1679,24 @@ export const RPTCollectionPage: React.FC = () => {
                 const isExpanded = !!expandedRows[group.key];
                 return (
                   <React.Fragment key={group.key}>
-                    <TableRow hover sx={{ '& > *': { borderBottom: isExpanded ? 'unset' : undefined } }}>
+                    <TableRow 
+                      hover 
+                      onClick={() => toggleRow(group.key)}
+                      sx={{ 
+                        cursor: 'pointer',
+                        bgcolor: isExpanded ? '#f0f9ff' : undefined,
+                        '& > *': { borderBottom: isExpanded ? 'unset' : undefined },
+                        '&:hover': { bgcolor: isExpanded ? '#e0f2fe !important' : '#f8fafc' }
+                      }}
+                    >
                       <TableCell sx={{ width: 48 }}>
                         <Tooltip title={isExpanded ? "Hide Breakdown" : "Show Breakdown"} arrow>
                           <IconButton
                             size="small"
-                            onClick={() => toggleRow(group.key)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRow(group.key);
+                            }}
                             sx={{ color: '#0284c7', bgcolor: isExpanded ? '#e0f2fe' : '#f0f9ff' }}
                           >
                             {isExpanded ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
@@ -1309,14 +1719,17 @@ export const RPTCollectionPage: React.FC = () => {
                         ₱ {group.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                       </TableCell>
                       <TableCell sx={{ color: '#64748b' }}>{group.remarks || '-'}</TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                         {!isAdmin ? (
                           <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                             <Tooltip title={`Edit OR #${group.orNumber} (${group.items.length} items)`} arrow>
                               <IconButton 
                                 color="primary" 
                                 size="small"
-                                onClick={() => handleEditGroup(group)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditGroup(group);
+                                }}
                               >
                                 <Edit fontSize="small" />
                               </IconButton>
@@ -1325,7 +1738,10 @@ export const RPTCollectionPage: React.FC = () => {
                               <IconButton 
                                 color="error" 
                                 size="small"
-                                onClick={() => confirmDeleteGroup(group)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  confirmDeleteGroup(group);
+                                }}
                               >
                                 <DeleteOutline fontSize="small" />
                               </IconButton>
@@ -1337,7 +1753,8 @@ export const RPTCollectionPage: React.FC = () => {
                               <IconButton 
                                 size="small" 
                                 color="primary" 
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   setSelectedItem(group.items[0]);
                                   setViewDialogOpen(true);
                                 }} 
@@ -1349,7 +1766,10 @@ export const RPTCollectionPage: React.FC = () => {
                             <Tooltip title={isExpanded ? "Collapse Breakdown" : "Expand Breakdown"} arrow>
                               <IconButton 
                                 size="small" 
-                                onClick={() => toggleRow(group.key)} 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleRow(group.key);
+                                }} 
                                 sx={{ bgcolor: '#f8fafc', color: '#64748b', '&:hover': { bgcolor: '#e2e8f0' } }}
                               >
                                 {isExpanded ? <KeyboardArrowUp fontSize="small" /> : <KeyboardArrowDown fontSize="small" />}
@@ -1394,6 +1814,7 @@ export const RPTCollectionPage: React.FC = () => {
                                   <TableCell sx={{ fontWeight: 'bold', bgcolor: '#ffffff' }}>Land Name / Owner</TableCell>
                                   <TableCell sx={{ fontWeight: 'bold', bgcolor: '#ffffff' }}>TD Number</TableCell>
                                   <TableCell sx={{ fontWeight: 'bold', bgcolor: '#ffffff' }}>Years Paid</TableCell>
+                                  <TableCell sx={{ fontWeight: 'bold', bgcolor: '#ffffff' }}>Parcel (Fraction)</TableCell>
                                   <TableCell align="right" sx={{ fontWeight: 'bold', bgcolor: '#ffffff' }}>Amount</TableCell>
                                   <TableCell sx={{ fontWeight: 'bold', bgcolor: '#ffffff' }}>Remarks</TableCell>
                                 </TableRow>
@@ -1413,6 +1834,7 @@ export const RPTCollectionPage: React.FC = () => {
                                       {item.tdNumber || '-'}
                                     </TableCell>
                                     <TableCell>{item.yearsPaid || '-'}</TableCell>
+                                    <TableCell>{item.parcel || '-'}</TableCell>
                                     <TableCell align="right" sx={{ fontWeight: 700 }}>
                                       ₱ {(item.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                                     </TableCell>
@@ -1743,6 +2165,10 @@ export const RPTCollectionPage: React.FC = () => {
               <Grid size={{ xs: 6 }}>
                 <Typography variant="caption" color="text.secondary">Years Paid</Typography>
                 <Typography variant="body1">{selectedItem.yearsPaid || '-'}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6 }}>
+                <Typography variant="caption" color="text.secondary">Parcel (Fraction)</Typography>
+                <Typography variant="body1">{selectedItem.parcel || '-'}</Typography>
               </Grid>
               <Grid size={{ xs: 12 }}>
                 <Typography variant="caption" color="text.secondary">Remarks</Typography>
