@@ -75,7 +75,35 @@ body {
   border-radius: 6px;
 }
 
+/* Compact Toolbar & Layout Utilities for Laptop Resolution */
+.toolbar-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-dense-cell {
+  padding: 5px 8px !important;
+  font-size: 0.81rem !important;
+}
+
 /* Clean Transitions */
 a, button {
   transition: all 0.15s ease-in-out;
 }
+
+/* Print Overrides: Hide tooltips, popovers, titlebars, and non-printable UI elements */
+@media print {
+  .no-print,
+  .MuiBackdrop-root,
+  .MuiDialogTitle-root,
+  .MuiDivider-root,
+  .MuiTooltip-popper,
+  .MuiTooltip-tooltip,
+  .MuiPopper-root,
+  .MuiPopover-root {
+    display: none !important;
+  }
+}
+

@@ -113,7 +113,7 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 4,
-          padding: 7,
+          padding: 5,
           border: '1px solid #e2e8f0',
           transition: 'all 0.15s ease',
           '&:hover': {
@@ -150,8 +150,9 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 4,
-          padding: '6px 14px',
+          padding: '4px 10px',
           fontWeight: 600,
+          fontSize: '0.82rem',
           textTransform: 'none',
           border: '1px solid transparent',
           transition: 'all 0.15s ease',
@@ -181,6 +182,10 @@ export const theme = createTheme({
         root: {
           borderRadius: 4,
           backgroundColor: '#ffffff',
+          fontSize: '0.84rem',
+          '& .MuiOutlinedInput-input': {
+            padding: '7px 10px',
+          },
           '& .MuiOutlinedInput-notchedOutline': {
             borderColor: '#e2e8f0',
             borderWidth: '1px',
@@ -199,16 +204,18 @@ export const theme = createTheme({
       styleOverrides: {
         root: {
           borderColor: '#f1f5f9',
-          padding: '10px 14px',
+          padding: '6px 10px',
+          fontSize: '0.81rem',
         },
         head: {
           fontWeight: 700,
           backgroundColor: '#f8fafc',
           color: '#475569',
-          fontSize: '0.8rem',
+          fontSize: '0.75rem',
           textTransform: 'uppercase',
-          letterSpacing: '0.04em',
+          letterSpacing: '0.03em',
           borderBottom: '1px solid #e2e8f0',
+          padding: '7px 10px',
         },
       },
     },

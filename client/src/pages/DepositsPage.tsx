@@ -227,6 +227,9 @@ export const DepositsPage: React.FC = () => {
       if (result) {
         showNotification(isEditing ? 'Deposit updated successfully' : 'Deposit recorded successfully', 'success');
         setOpenDialog(false);
+        setSearchTerm('');
+        setDateFrom('');
+        setDateTo('');
         loadDeposits();
       } else {
         showNotification('Failed to save deposit record', 'error');
@@ -793,7 +796,7 @@ export const DepositsPage: React.FC = () => {
         fullWidth
         PaperProps={{ sx: { borderRadius: 2 } }}
       >
-        <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1.5, borderBottom: '1px solid #e2e8f0' }}>
+        <DialogTitle className="no-print" sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1.5, borderBottom: '1px solid #e2e8f0' }}>
           <Typography variant="h6" fontWeight="800">
             Deposit Summary Report Preview
           </Typography>
@@ -801,7 +804,10 @@ export const DepositsPage: React.FC = () => {
             <Button
               variant="contained"
               startIcon={<Print />}
-              onClick={() => window.print()}
+              onClick={(e) => {
+                (e.currentTarget as HTMLElement).blur();
+                window.print();
+              }}
               sx={{ bgcolor: '#0284c7', textTransform: 'none', fontWeight: 700 }}
             >
               Print Report

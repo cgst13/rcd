@@ -52,7 +52,16 @@ export const SignatoriesPage: React.FC = () => {
   });
 
   const getSignatoryRoleLabel = (signatory: Signatory) => {
-    if (signatory.position.toLowerCase().includes('municipal treasurer') || signatory.remarks?.toLowerCase().includes('verification')) {
+    const pos = (signatory.position || '').toLowerCase();
+    const remarks = (signatory.remarks || '').toLowerCase();
+
+    // 1. Section D: Verification & Acknowledgment (Municipal Treasurer)
+    if (
+      remarks.includes('verification') || 
+      remarks.includes('acknowledgment') ||
+      pos.includes('municipal treasurer') || 
+      (pos.includes('treasurer') && !pos.includes('staff') && !pos.includes('clerk') && !pos.includes('assistant'))
+    ) {
       return { 
         title: 'Section D: Verification & Acknowledgment', 
         role: 'Municipal Treasurer',
@@ -60,19 +69,30 @@ export const SignatoriesPage: React.FC = () => {
         bgcolor: '#d1fae5' 
       };
     }
-    if (signatory.remarks?.toLowerCase().includes('prepared') || signatory.position.toLowerCase().includes('aa') || signatory.position.toLowerCase().includes('staff')) {
+
+    // 2. Section E: Certified Correct / Certified by (Municipal Accountant)
+    if (
+      remarks.includes('certified') || 
+      pos.includes('municipal accountant') ||
+      pos.includes('oic-office of the mun. accountant') ||
+      pos.includes('mun. accountant') ||
+      (pos.includes('accountant') && !pos.includes('staff') && !pos.includes('assistant') && !pos.includes('aide') && !pos.includes('clerk')) ||
+      (remarks.includes('accountant') && !remarks.includes('staff') && !remarks.includes('prepared'))
+    ) {
       return { 
-        title: 'Section E: Prepared by', 
-        role: 'Accounting Staff',
-        color: '#b45309', 
-        bgcolor: '#fef3c7' 
+        title: remarks.includes('certified by') ? 'Section E: Certified by' : 'Section E: Certified Correct', 
+        role: 'Municipal Accountant',
+        color: '#6d28d9', 
+        bgcolor: '#ede9fe' 
       };
     }
+
+    // 3. Section E: Prepared by (Accounting Staff)
     return { 
-      title: 'Section E: Certified Correct', 
-      role: 'Municipal Accountant',
-      color: '#6d28d9', 
-      bgcolor: '#ede9fe' 
+      title: 'Section E: Prepared by', 
+      role: 'Accounting Staff',
+      color: '#b45309', 
+      bgcolor: '#fef3c7' 
     };
   };
 
@@ -319,6 +339,7 @@ export const SignatoriesPage: React.FC = () => {
                 size="small"
                 value={formData.remarks}
                 onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                helperText="E.g., 'Municipal Treasurer / Verification & Acknowledgment', 'Municipal Accountant / Certified Correct', or 'Accounting Staff / Prepared by'"
               />
             </Grid>
           </Grid>

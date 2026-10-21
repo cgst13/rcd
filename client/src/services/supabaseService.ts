@@ -151,7 +151,7 @@ export const getRecentReports = async (): Promise<RCDReport[]> => {
 
         if (!isAdmin) {
           const filterParts: string[] = [];
-          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (userEmail) filterParts.push(`collector_email.ilike."${userEmail.replace(/"/g, '""')}"`);
           if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
           if (filterParts.length > 0) {
             query = query.or(filterParts.join(','));
@@ -325,7 +325,7 @@ export const saveAccountCode = async (code: AccountCode): Promise<boolean> => {
     newCodes = [...currentCodes];
     newCodes[index] = code;
   } else {
-    const nextId = currentCodes.length > 0 ? Math.max(...currentCodes.map(c => c.id)) + 1 : 1;
+    const nextId = currentCodes.length > 0 ? Math.max(...currentCodes.map(c => c.id || 0)) + 1 : 1;
     newCodes = [...currentCodes, { ...code, id: code.id || nextId }];
   }
   localStorage.setItem('account_codes', JSON.stringify(newCodes));
@@ -394,7 +394,7 @@ export const importAccountCodes = async (
 
   // LocalStorage Fallback
   const currentCodes = replaceExisting ? [] : await getAccountCodes();
-  let nextId = currentCodes.length > 0 ? Math.max(...currentCodes.map(c => c.id)) + 1 : 1;
+  let nextId = currentCodes.length > 0 ? Math.max(...currentCodes.map(c => c.id || 0)) + 1 : 1;
 
   const newCodes: AccountCode[] = [...currentCodes];
   for (const c of codes) {
@@ -423,8 +423,8 @@ export interface CollectorSignatoryProfile {
 export const getOfficialSignatories = async (): Promise<Signatory[]> => {
   let officialMunicipalSignatories: Signatory[] = [
     { id: 44, fullName: 'MENARD A. HERRERA', position: 'Municipal Treasurer', department: 'Office of the Municipal Treasurer', remarks: 'Municipal Treasurer / Verification & Acknowledgment' },
-    { id: 45, fullName: 'LEON F. PAZ, JR.', position: 'Municipal Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
-    { id: 46, fullName: 'HESTHER F. FANOGA', position: 'AA II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
+    { id: 45, fullName: 'SISTINE F. ATILLANO JR', position: 'SAA I/OIC-Office of the Mun. Accountant', department: 'Office of the Municipal Accountant', remarks: 'Municipal Accountant / Certified Correct' },
+    { id: 46, fullName: 'HESTHER F. FANOGA SR', position: 'Admin Assistant II', department: 'Office of the Municipal Accountant', remarks: 'Accounting Staff / Prepared by' },
   ];
 
   if (isSupabaseConfigured()) {
@@ -456,15 +456,15 @@ export const getOfficialSignatories = async (): Promise<Signatory[]> => {
           },
           {
             user_id: null,
-            full_name: 'LEON F. PAZ, JR.',
-            position: 'Municipal Accountant',
+            full_name: 'SISTINE F. ATILLANO JR',
+            position: 'SAA I/OIC-Office of the Mun. Accountant',
             department: 'Office of the Municipal Accountant',
             remarks: 'Municipal Accountant / Certified Correct'
           },
           {
             user_id: null,
-            full_name: 'HESTHER F. FANOGA',
-            position: 'AA II',
+            full_name: 'HESTHER F. FANOGA SR',
+            position: 'Admin Assistant II',
             department: 'Office of the Municipal Accountant',
             remarks: 'Accounting Staff / Prepared by'
           }
@@ -804,6 +804,16 @@ export const saveSignatory = async (signatory: Signatory): Promise<boolean> => {
     updated = [...current, { ...signatory, id: signatory.id || nextId }];
   }
   localStorage.setItem('signatories', JSON.stringify(updated));
+
+  try {
+    const currentOfficials = JSON.parse(localStorage.getItem('official_signatories') || '[]');
+    const offIdx = currentOfficials.findIndex((s: Signatory) => s.id === signatory.id);
+    if (offIdx >= 0) {
+      currentOfficials[offIdx] = signatory;
+      localStorage.setItem('official_signatories', JSON.stringify(currentOfficials));
+    }
+  } catch {}
+
   return true;
 };
 
@@ -853,7 +863,7 @@ export const getCollectionEntries = async (): Promise<CollectionItem[]> => {
 
         if (!isAdmin) {
           const filterParts: string[] = [];
-          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (userEmail) filterParts.push(`collector_email.ilike."${userEmail.replace(/"/g, '""')}"`);
           if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
           if (filterParts.length > 0) {
             query = query.or(filterParts.join(','));
@@ -1299,7 +1309,7 @@ export const getRPTCollections = async (): Promise<RPTCollectionItem[]> => {
 
         if (!isAdmin) {
           const filterParts: string[] = [];
-          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (userEmail) filterParts.push(`collector_email.ilike."${userEmail.replace(/"/g, '""')}"`);
           if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
           if (filterParts.length > 0) {
             query = query.or(filterParts.join(','));
@@ -1738,7 +1748,7 @@ export const getCommunityTaxCollections = async (): Promise<CommunityTaxItem[]> 
 
         if (!isAdmin) {
           const filterParts: string[] = [];
-          if (userEmail) filterParts.push(`collector_email.ilike.${userEmail}`);
+          if (userEmail) filterParts.push(`collector_email.ilike."${userEmail.replace(/"/g, '""')}"`);
           if (isValidUuid(user?.id)) filterParts.push(`user_id.eq.${user.id}`);
           if (filterParts.length > 0) {
             query = query.or(filterParts.join(','));
@@ -1874,6 +1884,9 @@ export const saveCommunityTaxCollection = async (item: CommunityTaxItem): Promis
 
         if (error) {
           console.error('Error inserting Community Tax to Supabase:', error);
+          if (error.code === '42501') {
+            throw new Error(`Row-Level Security (401 Unauthorized) error: Please disable RLS on rcd_community_tax_collections in Supabase by running: ALTER TABLE public.rcd_community_tax_collections DISABLE ROW LEVEL SECURITY;`);
+          }
           if (error.code === '23505') {
             throw new Error(`Conflict error (409): CTC #${item.ctcNo} already exists or primary key sequence needs resync. (${error.details || error.message})`);
           }
@@ -2337,12 +2350,15 @@ export interface LguDepartment {
 export const getLguDepartments = async (): Promise<LguDepartment[]> => {
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('lgu_departments')
-        .select('*')
-        .order('department_name', { ascending: true });
+      const data = await fetchAllRows(async (from, to) => {
+        return await supabase
+          .from('lgu_departments')
+          .select('*')
+          .order('department_name', { ascending: true })
+          .range(from, to);
+      });
 
-      if (!error && data) {
+      if (data && data.length > 0) {
         return data.map((d: any) => ({
           id: d.id,
           departmentCode: d.department_code,
@@ -2366,6 +2382,45 @@ export const getLguDepartments = async (): Promise<LguDepartment[]> => {
   ];
 };
 
+export const normalizeOrRangeAndCount = (
+  rawOrRange: string,
+  orNumbers: string[] = [],
+  providedCount?: number
+): { orRange: string; orCount: number } => {
+  let cleanedRange = (rawOrRange || '').trim();
+  cleanedRange = cleanedRange.replace(/\s*\(\d+\s*(?:ORs?|ors?)?\)\s*/gi, '').trim();
+
+  const match = cleanedRange.match(/(\d+)\s*[\u2014\-–]\s*(\d+)/);
+
+  let calculatedCount = 0;
+  if (match) {
+    const sNum = parseInt(match[1], 10);
+    const eNum = parseInt(match[2], 10);
+    if (!isNaN(sNum) && !isNaN(eNum) && eNum >= sNum) {
+      calculatedCount = eNum - sNum + 1;
+    }
+  }
+
+  if (calculatedCount === 0) {
+    if (orNumbers && orNumbers.length > 0) {
+      calculatedCount = orNumbers.length;
+    } else if (typeof providedCount === 'number' && providedCount > 0) {
+      calculatedCount = providedCount;
+    }
+  }
+
+  const finalCount = calculatedCount > 0 ? calculatedCount : 0;
+  let finalRange = cleanedRange;
+  if (cleanedRange && finalCount > 0) {
+    finalRange = `${cleanedRange} (${finalCount} ${finalCount === 1 ? 'OR' : 'ORs'})`;
+  }
+
+  return {
+    orRange: finalRange,
+    orCount: finalCount
+  };
+};
+
 // ============================================================================
 // 11. ADMIN CONSOLIDATED REPORTS & SUBMISSION TRACKING
 // ============================================================================
@@ -2376,6 +2431,7 @@ export interface AdminSubCategoryCharge {
   accountCode: string;
   itemCount: number;
   amount: number;
+  itemIds?: number[];
 }
 
 export interface AdminSubmittedReportRecord {
@@ -2389,20 +2445,37 @@ export interface AdminSubmittedReportRecord {
   orCount: number;
   orNumbers: string[];
   itemIds: number[];
-  collectionType: 'general' | 'rpt';
+  collectionType: 'general' | 'rpt' | 'ctc' | 'consol';
   totalAmount: number;
   subCategorySummary: AdminSubCategoryCharge[];
   submittedAt: string;
   submittedBy: string;
-  status: 'Submitted' | 'Verified';
+  status: 'Submitted' | 'Verified' | 'Pending Admin Approval' | 'Unarchived' | 'Consolidated' | 'Reported';
+  unarchiveStatus?: 'None' | 'Pending Admin Approval' | 'Approved' | 'Rejected';
+  unarchiveRequestedBy?: string;
+  unarchiveRequestedAt?: string;
   dateFrom: string;
   dateTo: string;
   notes?: string;
   stagedRows?: any[];
+  reportData?: any;
   beginningBalance?: number;
   endingBalance?: number;
   selectedDepositIds?: string[];
   selectedDeposits?: any[];
+  reportType?: 'collector_submission' | 'admin_consolidation' | 'admin_weekly' | 'admin_monthly';
+  reportLevel?: 'weekly' | 'monthly';
+  submittedToMonthly?: boolean;
+  consolidatedInMonthlyReportId?: string;
+  consolidatedWeeklyReportIds?: string[];
+  isReportedByAdmin?: boolean;
+  consolidatedReportIds?: string[];
+  consolidatedInReportId?: string;
+  baseReportNumber?: string;
+  subReportSuffix?: string;
+  weekLabel?: string;
+  monthLabel?: string;
+  reportDate?: string;
 }
 
 export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRecord[]> => {
@@ -2420,7 +2493,12 @@ export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRe
           .range(from, to);
       });
 
-      if (data && data.length > 0) {
+      if (data) {
+        if (data.length === 0) {
+          localStorage.setItem('rcd_admin_submitted_reports', '[]');
+          return [];
+        }
+
         const remoteReports: AdminSubmittedReportRecord[] = data.map((r: any) => {
           const colData = r.collections;
           const isStructured = colData && typeof colData === 'object' && !Array.isArray(colData);
@@ -2434,33 +2512,23 @@ export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRe
           if (!afNo && r.report_number && r.report_number.startsWith('ADM-')) {
             const parts = r.report_number.split('-');
             if (parts.length >= 3) {
-              afNo = parts[1]; // e.g. ADM-214-086207 -> "214"
+              afNo = parts[1];
             }
           }
           if (!afNo) {
             afNo = r.fund_type === 'SEF' ? 'A.F. NO. 56' : (r.report_number?.includes('56') ? 'A.F. NO. 56' : 'A.F. NO. 51');
           }
 
-          // Extract OR Range
-          let orRange = isStructured && colData.orRange ? colData.orRange : '';
-          const orNumbers: string[] = isStructured && Array.isArray(colData.orNumbers)
+          const rawOrs: string[] = isStructured && Array.isArray(colData.orNumbers)
             ? colData.orNumbers
             : subCategorySummary.map((c: any) => c.orNo || c.orNumber || '').filter(Boolean);
+          const orNumbers: string[] = Array.from(new Set(rawOrs.map(o => String(o).trim()).filter(Boolean)));
 
-          if (!orRange && orNumbers.length > 0) {
-            if (orNumbers.length === 1) orRange = orNumbers[0];
-            else {
-              const sorted = [...orNumbers].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-              orRange = `${sorted[0]} — ${sorted[sorted.length - 1]} (${sorted.length} ORs)`;
-            }
-          }
-          if (!orRange) {
-            orRange = r.report_number || '';
-          }
-
-          const orCount = isStructured && typeof colData.orCount === 'number'
-            ? colData.orCount
-            : (orNumbers.length || subCategorySummary.length);
+          const { orRange, orCount } = normalizeOrRangeAndCount(
+            isStructured && colData.orRange ? String(colData.orRange).trim() : '',
+            orNumbers,
+            isStructured && typeof colData.orCount === 'number' ? colData.orCount : undefined
+          );
 
           const itemIds: number[] = isStructured && Array.isArray(colData.itemIds)
             ? colData.itemIds
@@ -2470,9 +2538,62 @@ export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRe
             ? colData.collectionType
             : (r.fund_type === 'SEF' || r.report_number?.includes('AF56') ? 'rpt' : 'general');
 
+          const reportType: 'collector_submission' | 'admin_consolidation' | 'admin_weekly' | 'admin_monthly' = (isStructured && colData.reportType)
+            ? colData.reportType
+            : (r.report_number?.startsWith('ADM-') || (isStructured && colData.submittedBy === 'Administrator') 
+                ? (r.report_number?.includes('MONTHLY') || colData.reportLevel === 'monthly' ? 'admin_monthly' : 'admin_weekly') 
+                : 'collector_submission');
+
+          const reportLevel: 'weekly' | 'monthly' | undefined = (isStructured && colData.reportLevel)
+            ? colData.reportLevel
+            : (reportType === 'admin_monthly' ? 'monthly' : (reportType === 'admin_weekly' || reportType === 'admin_consolidation' ? 'weekly' : undefined));
+
+          const submittedToMonthly: boolean = isStructured && (
+            colData.submittedToMonthly === true || 
+            Boolean(colData.consolidatedInMonthlyReportId)
+          );
+
+          const consolidatedInMonthlyReportId: string | undefined = isStructured && colData.consolidatedInMonthlyReportId
+            ? colData.consolidatedInMonthlyReportId
+            : undefined;
+
+          const consolidatedWeeklyReportIds: string[] | undefined = isStructured && Array.isArray(colData.consolidatedWeeklyReportIds)
+            ? colData.consolidatedWeeklyReportIds
+            : undefined;
+
+          const isReportedByAdmin: boolean = isStructured && (
+            colData.isReportedByAdmin === true || 
+            colData.isConsolidated === true || 
+            Boolean(colData.consolidatedInReportId) || 
+            colData.status === 'Consolidated' ||
+            r.status === 'Consolidated' || 
+            r.status === 'Reported'
+          );
+
+          const consolidatedReportIds: string[] | undefined = isStructured && Array.isArray(colData.consolidatedReportIds)
+            ? colData.consolidatedReportIds
+            : undefined;
+
+          const consolidatedInReportId: string | undefined = isStructured && colData.consolidatedInReportId
+            ? colData.consolidatedInReportId
+            : undefined;
+
+          const repNum = r.report_number || `RPT-${r.id.substring(0, 8)}`;
+          const suffixMatch = repNum.match(/[-_]([AB])$/i);
+          const subReportSuffix = isStructured && colData.subReportSuffix ? colData.subReportSuffix : (suffixMatch ? suffixMatch[1].toUpperCase() : undefined);
+          const baseReportNumber = isStructured && colData.baseReportNumber ? colData.baseReportNumber : repNum.replace(/[-_][AB]$/i, '');
+
+          const submittedBy = isStructured && colData.submittedBy
+            ? colData.submittedBy
+            : (repNum.startsWith('ADM-') || repNum.startsWith('CONSOL-') || reportType !== 'collector_submission'
+                ? 'Administrator'
+                : (r.collector_name || 'Collector'));
+
           return {
             id: r.id,
-            reportNumber: r.report_number || `RPT-${r.id.substring(0, 8)}`,
+            reportNumber: repNum,
+            baseReportNumber,
+            subReportSuffix,
             collectorName: r.collector_name || 'Collector',
             collectorEmail: r.collector_email,
             userId: r.user_id,
@@ -2485,90 +2606,157 @@ export const getAdminSubmittedReports = async (): Promise<AdminSubmittedReportRe
             totalAmount: parseFloat(r.total_collection || 0),
             subCategorySummary,
             submittedAt: r.created_at || new Date().toISOString(),
-            submittedBy: isStructured && colData.submittedBy ? colData.submittedBy : 'Administrator',
+            submittedBy,
             status: r.status || 'Submitted',
+            unarchiveStatus: isStructured && colData.unarchiveStatus ? colData.unarchiveStatus : (r.status === 'Pending Admin Approval' ? 'Pending Admin Approval' : 'None'),
+            unarchiveRequestedBy: isStructured ? colData.unarchiveRequestedBy : undefined,
+            unarchiveRequestedAt: isStructured ? colData.unarchiveRequestedAt : undefined,
             dateFrom: isStructured && colData.dateFrom ? colData.dateFrom : (r.date || ''),
             dateTo: isStructured && colData.dateTo ? colData.dateTo : (r.date || ''),
             stagedRows: isStructured && Array.isArray(colData.stagedRows) ? colData.stagedRows : undefined,
+            reportData: isStructured && colData.reportData ? colData.reportData : undefined,
             beginningBalance: isStructured && typeof colData.beginningBalance === 'number' ? colData.beginningBalance : undefined,
             endingBalance: isStructured && typeof colData.endingBalance === 'number' ? colData.endingBalance : undefined,
             selectedDepositIds: isStructured && Array.isArray(colData.selectedDepositIds) ? colData.selectedDepositIds : undefined,
-            selectedDeposits: isStructured && Array.isArray(colData.selectedDeposits) ? colData.selectedDeposits : (Array.isArray(r.deposits) && r.deposits.length > 0 ? r.deposits : undefined)
+            selectedDeposits: isStructured && Array.isArray(colData.selectedDeposits) ? colData.selectedDeposits : (Array.isArray(r.deposits) && r.deposits.length > 0 ? r.deposits : undefined),
+            reportType,
+            reportLevel,
+            submittedToMonthly,
+            consolidatedInMonthlyReportId,
+            consolidatedWeeklyReportIds,
+            isReportedByAdmin,
+            consolidatedReportIds,
+            consolidatedInReportId,
+            monthLabel: isStructured && colData.monthLabel ? colData.monthLabel : undefined
           };
         });
 
-        // Merge local and remote, keyed strictly by reportNumber so NO duplicate rows ever appear
         const mergedMap = new Map<string, AdminSubmittedReportRecord>();
-
-        // 1. Add remote reports first
         remoteReports.forEach(r => {
           const key = (r.reportNumber || r.id).trim().toUpperCase();
           mergedMap.set(key, r);
         });
 
-        // 2. Overlay localStored (prefer local's richer metadata if available, but retain remote ID if valid uuid)
         localStored.forEach(l => {
           const key = (l.reportNumber || l.id).trim().toUpperCase();
           const remote = mergedMap.get(key);
+          const dedupedLocalOrs = Array.from(new Set((l.orNumbers || []).map(o => String(o).trim()).filter(Boolean)));
+          
           if (remote) {
+            const { orRange: normOrRange, orCount: normOrCount } = normalizeOrRangeAndCount(
+              l.orRange || remote.orRange,
+              dedupedLocalOrs.length ? dedupedLocalOrs : remote.orNumbers,
+              l.orCount || remote.orCount
+            );
             mergedMap.set(key, {
-              ...remote,
               ...l,
+              ...remote,
               id: isValidUuid(remote.id) ? remote.id : l.id,
-              afNo: l.afNo || remote.afNo,
-              orRange: l.orRange || remote.orRange,
-              orNumbers: l.orNumbers?.length ? l.orNumbers : remote.orNumbers,
-              orCount: l.orCount || remote.orCount,
-              subCategorySummary: l.subCategorySummary?.length ? l.subCategorySummary : remote.subCategorySummary,
-              stagedRows: l.stagedRows || remote.stagedRows
+              stagedRows: remote.stagedRows || l.stagedRows,
+              reportData: remote.reportData || l.reportData,
+              subCategorySummary: remote.subCategorySummary?.length ? remote.subCategorySummary : l.subCategorySummary,
+              afNo: remote.afNo || l.afNo,
+              orRange: normOrRange,
+              orNumbers: dedupedLocalOrs.length ? dedupedLocalOrs : remote.orNumbers,
+              orCount: normOrCount,
             });
-          } else {
-            mergedMap.set(key, l);
           }
         });
 
-        return Array.from(mergedMap.values()).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+        const finalReports = autoHealSubmittedReports(Array.from(mergedMap.values())).sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+        localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(finalReports));
+        return finalReports;
       }
     } catch (e) {
       console.warn('Error fetching submitted reports from Supabase:', e);
     }
   }
 
-  return localStored.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+  const healedLocal = autoHealSubmittedReports(localStored);
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(healedLocal));
+  return healedLocal.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
 };
 
 export const getSubmittedItemIds = async (): Promise<Set<string>> => {
   const submittedSet = new Set<string>();
 
-  // 1. Check localStorage tracking
-  const localItemKeys: string[] = JSON.parse(localStorage.getItem('rcd_submitted_item_keys') || '[]');
-  localItemKeys.forEach(k => submittedSet.add(k));
-
-  // 2. Check submitted reports
+  // The single source of truth for active submitted reports is getAdminSubmittedReports()
   const submittedReports = await getAdminSubmittedReports();
+  
   submittedReports.forEach(report => {
+    // Skip locking items if report is unarchived or requested to unarchive for editing/resubmission
+    if (report.unarchiveStatus === 'Pending Admin Approval' || report.unarchiveStatus === 'Approved') {
+      return;
+    }
+
+    // Collect keys from staged rows if present
     if (report.stagedRows && Array.isArray(report.stagedRows)) {
       report.stagedRows.forEach((sr: any) => {
-        const cType = sr.collectionType || report.collectionType;
+        const cType = sr.collectionType || report.collectionType || 'general';
         (sr.itemIds || []).forEach((id: number) => submittedSet.add(`${cType}_${id}`));
         (sr.orNumbers || []).forEach((or: string) => {
           if (or) {
-            if (sr.bookletNo) submittedSet.add(`or_${sr.bookletNo}_${or}`);
-            submittedSet.add(`or_${report.afNo}_${or}`);
+            const cleanOr = String(or).trim();
+            if (sr.bookletNo) {
+              submittedSet.add(`or_${sr.bookletNo}_${cleanOr}`);
+              submittedSet.add(`or_${sr.bookletNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+            }
+            if (report.afNo) {
+              submittedSet.add(`or_${report.afNo}_${cleanOr}`);
+              submittedSet.add(`or_${report.afNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+            }
             if (cType === 'rpt' || report.collectionType === 'rpt') {
-              submittedSet.add(`or_A.F. NO. 56_${or}`);
+              submittedSet.add(`or_A.F. NO. 56_${cleanOr}`);
+              submittedSet.add(`or_AF56_${cleanOr}`);
+              submittedSet.add(`or_56_${cleanOr}`);
+            } else if (cType === 'ctc' || report.collectionType === 'ctc') {
+              submittedSet.add(`or_BRF NO. 0016_${cleanOr}`);
+              submittedSet.add(`or_BRF 0016_${cleanOr}`);
+              submittedSet.add(`or_0016_${cleanOr}`);
+            } else {
+              submittedSet.add(`or_A.F. NO. 51_${cleanOr}`);
+              submittedSet.add(`or_AF51_${cleanOr}`);
+              submittedSet.add(`or_51_${cleanOr}`);
             }
           }
         });
       });
     }
-    report.itemIds.forEach(id => {
-      submittedSet.add(`${report.collectionType}_${id}`);
+
+    // Collect keys from top-level itemIds
+    (report.itemIds || []).forEach(id => {
+      submittedSet.add(`${report.collectionType || 'general'}_${id}`);
     });
-    report.orNumbers.forEach(or => {
-      if (or) submittedSet.add(`or_${report.afNo}_${or}`);
+
+    // Collect keys from top-level orNumbers
+    (report.orNumbers || []).forEach(or => {
+      if (or) {
+        const cleanOr = String(or).trim();
+        if (report.afNo) {
+          submittedSet.add(`or_${report.afNo}_${cleanOr}`);
+          submittedSet.add(`or_${report.afNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+        }
+        if (report.collectionType === 'rpt') {
+          submittedSet.add(`or_A.F. NO. 56_${cleanOr}`);
+          submittedSet.add(`or_AF56_${cleanOr}`);
+          submittedSet.add(`or_56_${cleanOr}`);
+        } else if (report.collectionType === 'ctc') {
+          submittedSet.add(`or_BRF NO. 0016_${cleanOr}`);
+          submittedSet.add(`or_BRF 0016_${cleanOr}`);
+          submittedSet.add(`or_0016_${cleanOr}`);
+        } else {
+          submittedSet.add(`or_A.F. NO. 51_${cleanOr}`);
+          submittedSet.add(`or_AF51_${cleanOr}`);
+          submittedSet.add(`or_51_${cleanOr}`);
+        }
+      }
     });
   });
+
+  // Always keep localStorage synchronized with strictly active submitted keys
+  try {
+    localStorage.setItem('rcd_submitted_item_keys', JSON.stringify(Array.from(submittedSet)));
+  } catch {}
 
   return submittedSet;
 };
@@ -2632,7 +2820,16 @@ export const saveAdminSubmittedReport = async (
         beginningBalance: record.beginningBalance ?? 0,
         endingBalance: record.endingBalance ?? 0,
         selectedDepositIds: record.selectedDepositIds || [],
-        selectedDeposits: record.selectedDeposits || []
+        selectedDeposits: record.selectedDeposits || [],
+        reportType: record.reportType || (record.reportNumber?.startsWith('ADM-') || record.submittedBy === 'Administrator' ? (record.reportNumber?.includes('MONTHLY') ? 'admin_monthly' : 'admin_weekly') : 'collector_submission'),
+        reportLevel: record.reportLevel || (record.reportType === 'admin_monthly' ? 'monthly' : 'weekly'),
+        submittedToMonthly: record.submittedToMonthly ?? false,
+        consolidatedInMonthlyReportId: record.consolidatedInMonthlyReportId || null,
+        consolidatedWeeklyReportIds: record.consolidatedWeeklyReportIds || [],
+        isReportedByAdmin: record.isReportedByAdmin ?? (record.reportType === 'admin_consolidation' || record.reportType === 'admin_weekly' || record.reportType === 'admin_monthly'),
+        consolidatedReportIds: record.consolidatedReportIds || [],
+        consolidatedInReportId: record.consolidatedInReportId || null,
+        monthLabel: record.monthLabel || undefined
       };
 
       const depositsList = record.selectedDeposits || [];
@@ -2651,7 +2848,7 @@ export const saveAdminSubmittedReport = async (
           total_collection: record.totalAmount,
           deposits: depositsList,
           total_deposit: totalDeposit,
-          status: 'Submitted'
+          status: record.status || 'Submitted'
         });
 
       if (record.selectedDepositIds && record.selectedDepositIds.length > 0) {
@@ -2684,10 +2881,347 @@ export const saveAdminSubmittedReport = async (
   return true;
 };
 
+export const markCollectorReportsAsConsolidated = async (
+  collectorReportIds: string[],
+  adminReportId: string
+): Promise<boolean> => {
+  if (!collectorReportIds || collectorReportIds.length === 0) return true;
+  const idSet = new Set(collectorReportIds);
+
+  // 1. Update localStorage
+  const localStored: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  const updatedLocal = localStored.map(r => {
+    if (idSet.has(r.id) || idSet.has(r.reportNumber)) {
+      return {
+        ...r,
+        isReportedByAdmin: true,
+        status: 'Consolidated' as const,
+        consolidatedInReportId: adminReportId
+      };
+    }
+    return r;
+  });
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updatedLocal));
+
+  // 2. Update Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      for (const id of collectorReportIds) {
+        if (isValidUuid(id)) {
+          const { data } = await supabase.from('rcd_reports').select('collections').eq('id', id).maybeSingle();
+          if (data && data.collections) {
+            const newCols = {
+              ...data.collections,
+              isReportedByAdmin: true,
+              isConsolidated: true,
+              consolidatedInReportId: adminReportId,
+              status: 'Consolidated'
+            };
+            await supabase.from('rcd_reports').update({ collections: newCols }).eq('id', id);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error marking collector reports as consolidated in Supabase:', e);
+    }
+  }
+
+  return true;
+};
+
+export const markWeeklyReportsAsConsolidatedInMonthly = async (
+  weeklyReportIds: string[],
+  monthlyReportId: string
+): Promise<boolean> => {
+  if (!weeklyReportIds || weeklyReportIds.length === 0) return true;
+  const idSet = new Set(weeklyReportIds);
+
+  // 1. Update localStorage
+  const localStored: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  const updatedLocal = localStored.map(r => {
+    if (idSet.has(r.id) || idSet.has(r.reportNumber)) {
+      return {
+        ...r,
+        submittedToMonthly: true,
+        consolidatedInMonthlyReportId: monthlyReportId
+      };
+    }
+    return r;
+  });
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updatedLocal));
+
+  // 2. Update Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      for (const id of weeklyReportIds) {
+        if (isValidUuid(id)) {
+          const { data } = await supabase.from('rcd_reports').select('collections').eq('id', id).maybeSingle();
+          if (data && data.collections) {
+            const newCols = {
+              ...data.collections,
+              submittedToMonthly: true,
+              consolidatedInMonthlyReportId: monthlyReportId
+            };
+            await supabase.from('rcd_reports').update({ collections: newCols }).eq('id', id);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error marking weekly reports as consolidated in monthly report in Supabase:', e);
+    }
+  }
+
+  return true;
+};
+
+export const autoHealSubmittedReports = (reports: AdminSubmittedReportRecord[]): AdminSubmittedReportRecord[] => {
+  if (!Array.isArray(reports)) return [];
+  
+  const activeAdminReportIdentifiers = new Set<string>();
+  const activeConsolidatedChildIds = new Set<string>();
+
+  reports.forEach(r => {
+    const isAdminRep = r.reportType === 'admin_weekly' || 
+                       r.reportType === 'admin_monthly' || 
+                       r.reportType === 'admin_consolidation' || 
+                       r.reportNumber?.startsWith('ADM-') || 
+                       r.submittedBy === 'Administrator';
+    if (isAdminRep) {
+      if (r.id) activeAdminReportIdentifiers.add(r.id.trim().toUpperCase());
+      if (r.reportNumber) activeAdminReportIdentifiers.add(r.reportNumber.trim().toUpperCase());
+      if (Array.isArray(r.consolidatedReportIds)) {
+        r.consolidatedReportIds.forEach(cid => {
+          if (cid) activeConsolidatedChildIds.add(String(cid).trim().toUpperCase());
+        });
+      }
+      if (Array.isArray(r.consolidatedWeeklyReportIds)) {
+        r.consolidatedWeeklyReportIds.forEach(cid => {
+          if (cid) activeConsolidatedChildIds.add(String(cid).trim().toUpperCase());
+        });
+      }
+    }
+  });
+
+  return reports.map(r => {
+    const isCollectorSubmission = r.reportType === 'collector_submission' && 
+                                   !r.reportNumber?.startsWith('ADM-') && 
+                                   r.submittedBy !== 'Administrator';
+    if (isCollectorSubmission) {
+      const parentId = r.consolidatedInReportId?.trim().toUpperCase();
+      const parentExists = parentId ? activeAdminReportIdentifiers.has(parentId) : false;
+      const rid = (r.id || '').trim().toUpperCase();
+      const rno = (r.reportNumber || '').trim().toUpperCase();
+      const isChildOfActive = activeConsolidatedChildIds.has(rid) || activeConsolidatedChildIds.has(rno);
+
+      // If marked consolidated, but parent report is gone and not in any active consolidation:
+      if (!parentExists && !isChildOfActive && (r.isReportedByAdmin || r.status === 'Consolidated' || r.status === 'Reported')) {
+        return {
+          ...r,
+          isReportedByAdmin: false,
+          status: 'Submitted' as const,
+          consolidatedInReportId: undefined,
+          unarchiveStatus: 'None' as const
+        };
+      }
+    }
+    return r;
+  });
+};
+
+export const revertWeeklyReportsFromMonthly = async (
+  weeklyReportIds?: string[]
+): Promise<boolean> => {
+  if (!weeklyReportIds || weeklyReportIds.length === 0) return true;
+  const idSet = new Set(weeklyReportIds.map(id => String(id).trim().toUpperCase()));
+
+  // 1. Update localStorage
+  const localStored: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+
+  const collectorReportIdsToRevert: string[] = [];
+  localStored.forEach(r => {
+    const keyId = (r.id || '').trim().toUpperCase();
+    const keyNo = (r.reportNumber || '').trim().toUpperCase();
+    if (idSet.has(keyId) || idSet.has(keyNo)) {
+      if (Array.isArray(r.consolidatedReportIds)) {
+        collectorReportIdsToRevert.push(...r.consolidatedReportIds);
+      }
+    }
+  });
+
+  const updatedLocal = localStored.map(r => {
+    const keyId = (r.id || '').trim().toUpperCase();
+    const keyNo = (r.reportNumber || '').trim().toUpperCase();
+    if (idSet.has(keyId) || idSet.has(keyNo)) {
+      return {
+        ...r,
+        submittedToMonthly: false,
+        consolidatedInMonthlyReportId: undefined
+      };
+    }
+    return r;
+  });
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updatedLocal));
+
+  // 2. Update Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      for (const id of weeklyReportIds) {
+        if (!id) continue;
+        let query = supabase.from('rcd_reports').select('id, report_number, collections');
+        if (isValidUuid(id)) {
+          query = query.eq('id', id);
+        } else {
+          query = query.eq('report_number', id);
+        }
+        const { data } = await query.maybeSingle();
+        if (data) {
+          const colData = (data.collections && typeof data.collections === 'object') ? data.collections : {};
+          if (Array.isArray(colData.consolidatedReportIds)) {
+            collectorReportIdsToRevert.push(...colData.consolidatedReportIds);
+          }
+          const newCols = {
+            ...colData,
+            submittedToMonthly: false,
+            consolidatedInMonthlyReportId: null
+          };
+          let updateQuery = supabase.from('rcd_reports').update({ collections: newCols });
+          if (isValidUuid(data.id)) {
+            await updateQuery.eq('id', data.id);
+          } else if (data.report_number) {
+            await updateQuery.eq('report_number', data.report_number);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error reverting weekly reports from monthly report in Supabase:', e);
+    }
+  }
+
+  // Also revert any collector reports inside these weekly reports so they return to available consolidation pool
+  if (collectorReportIdsToRevert.length > 0) {
+    await revertCollectorReportsFromConsolidation(collectorReportIdsToRevert);
+  }
+
+  return true;
+};
+
+export const revertCollectorReportsFromConsolidation = async (
+  collectorReportIds?: string[]
+): Promise<boolean> => {
+  if (!collectorReportIds || collectorReportIds.length === 0) return true;
+  const idSet = new Set(collectorReportIds.map(id => String(id).trim().toUpperCase()));
+
+  // 1. Update localStorage
+  const localStored: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  const updatedLocal = localStored.map(r => {
+    const keyId = (r.id || '').trim().toUpperCase();
+    const keyNo = (r.reportNumber || '').trim().toUpperCase();
+    if (idSet.has(keyId) || idSet.has(keyNo)) {
+      return {
+        ...r,
+        isReportedByAdmin: false,
+        isConsolidated: false,
+        status: 'Submitted' as const,
+        consolidatedInReportId: undefined,
+        unarchiveStatus: 'None' as const
+      };
+    }
+    return r;
+  });
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updatedLocal));
+
+  // 2. Update Supabase
+  if (isSupabaseConfigured()) {
+    try {
+      for (const id of collectorReportIds) {
+        if (!id) continue;
+        let query = supabase.from('rcd_reports').select('id, report_number, collections');
+        if (isValidUuid(id)) {
+          query = query.eq('id', id);
+        } else {
+          query = query.eq('report_number', id);
+        }
+        const { data } = await query.maybeSingle();
+        if (data) {
+          const colData = (data.collections && typeof data.collections === 'object') ? data.collections : {};
+          const newCols = {
+            ...colData,
+            isReportedByAdmin: false,
+            isConsolidated: false,
+            consolidatedInReportId: null,
+            status: 'Submitted',
+            unarchiveStatus: 'None'
+          };
+          let updateQuery = supabase.from('rcd_reports').update({ collections: newCols, status: 'Submitted' });
+          if (isValidUuid(data.id)) {
+            await updateQuery.eq('id', data.id);
+          } else if (data.report_number) {
+            await updateQuery.eq('report_number', data.report_number);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error reverting collector reports from consolidation in Supabase:', e);
+    }
+  }
+
+  return true;
+};
+
+export const expandOrNumbersSet = (rawInputs: (string | undefined | null)[]): Set<string> => {
+  const result = new Set<string>();
+
+  rawInputs.forEach(input => {
+    if (!input) return;
+    const str = String(input).trim();
+    if (!str) return;
+
+    result.add(str);
+    const cleanStr = str.replace(/[^0-9]/g, '');
+    if (cleanStr) {
+      result.add(cleanStr);
+      const parsedInt = parseInt(cleanStr, 10);
+      if (!isNaN(parsedInt)) {
+        result.add(String(parsedInt));
+        result.add(String(parsedInt).padStart(7, '0'));
+      }
+    }
+
+    // Match range patterns like "0012301 - 0012350" or "12301-12350"
+    const match = str.match(/(\d+)\s*[\u2014\-–]\s*(\d+)/);
+    if (match) {
+      const sNum = parseInt(match[1], 10);
+      const eNum = parseInt(match[2], 10);
+      const padLen = Math.max(match[1].length, match[2].length);
+
+      if (!isNaN(sNum) && !isNaN(eNum) && eNum >= sNum && eNum - sNum <= 2000) {
+        for (let i = sNum; i <= eNum; i++) {
+          const numStr = String(i);
+          result.add(numStr);
+          if (padLen > numStr.length) {
+            result.add(numStr.padStart(padLen, '0'));
+          }
+          result.add(numStr.padStart(7, '0'));
+        }
+      }
+    }
+  });
+
+  return result;
+};
+
 export const unmarkAdminSubmittedReport = async (
   reportId: string,
-  itemIds: number[],
-  collectionType: 'general' | 'rpt',
+  itemIds: number[] = [],
+  collectionType: 'general' | 'rpt' | 'ctc' | 'consol' | string = 'general',
   afNo?: string,
   orNumbers?: string[]
 ): Promise<boolean> => {
@@ -2695,7 +3229,7 @@ export const unmarkAdminSubmittedReport = async (
   const current: AdminSubmittedReportRecord[] = JSON.parse(
     localStorage.getItem('rcd_admin_submitted_reports') || '[]'
   );
-  const targetReport = current.find(r => r.id === reportId);
+  const targetReport = current.find(r => r.id === reportId || r.reportNumber === reportId);
   const targetReportNumber = targetReport?.reportNumber;
 
   const updated = current.filter(r => r.id !== reportId && (!targetReportNumber || r.reportNumber !== targetReportNumber));
@@ -2717,10 +3251,27 @@ export const unmarkAdminSubmittedReport = async (
       (sr.itemIds || []).forEach((id: number) => keysToRemove.add(`${cType}_${id}`));
       (sr.orNumbers || []).forEach((or: string) => {
         if (or) {
-          if (sr.bookletNo) keysToRemove.add(`or_${sr.bookletNo}_${or}`);
-          keysToRemove.add(`or_${afNo}_${or}`);
+          const cleanOr = String(or).trim();
+          if (sr.bookletNo) {
+            keysToRemove.add(`or_${sr.bookletNo}_${cleanOr}`);
+            keysToRemove.add(`or_${sr.bookletNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+          }
+          if (afNo) {
+            keysToRemove.add(`or_${afNo}_${cleanOr}`);
+            keysToRemove.add(`or_${afNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+          }
           if (cType === 'rpt' || collectionType === 'rpt') {
-            keysToRemove.add(`or_A.F. NO. 56_${or}`);
+            keysToRemove.add(`or_A.F. NO. 56_${cleanOr}`);
+            keysToRemove.add(`or_AF56_${cleanOr}`);
+            keysToRemove.add(`or_56_${cleanOr}`);
+          } else if (cType === 'ctc' || collectionType === 'ctc') {
+            keysToRemove.add(`or_BRF NO. 0016_${cleanOr}`);
+            keysToRemove.add(`or_BRF 0016_${cleanOr}`);
+            keysToRemove.add(`or_0016_${cleanOr}`);
+          } else {
+            keysToRemove.add(`or_A.F. NO. 51_${cleanOr}`);
+            keysToRemove.add(`or_AF51_${cleanOr}`);
+            keysToRemove.add(`or_51_${cleanOr}`);
           }
         }
       });
@@ -2728,8 +3279,56 @@ export const unmarkAdminSubmittedReport = async (
   }
 
   itemIds.forEach(id => keysToRemove.add(`${collectionType}_${id}`));
-  if (orNumbers && afNo) {
-    orNumbers.forEach(or => keysToRemove.add(`or_${afNo}_${or}`));
+  if (targetReport?.itemIds && Array.isArray(targetReport.itemIds)) {
+    targetReport.itemIds.forEach(id => keysToRemove.add(`${collectionType}_${id}`));
+  }
+  if (orNumbers) {
+    orNumbers.forEach(or => {
+      if (or) {
+        const cleanOr = String(or).trim();
+        if (afNo) {
+          keysToRemove.add(`or_${afNo}_${cleanOr}`);
+          keysToRemove.add(`or_${afNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+        }
+        if (collectionType === 'rpt') {
+          keysToRemove.add(`or_A.F. NO. 56_${cleanOr}`);
+          keysToRemove.add(`or_AF56_${cleanOr}`);
+          keysToRemove.add(`or_56_${cleanOr}`);
+        } else if (collectionType === 'ctc') {
+          keysToRemove.add(`or_BRF NO. 0016_${cleanOr}`);
+          keysToRemove.add(`or_BRF 0016_${cleanOr}`);
+          keysToRemove.add(`or_0016_${cleanOr}`);
+        } else {
+          keysToRemove.add(`or_A.F. NO. 51_${cleanOr}`);
+          keysToRemove.add(`or_AF51_${cleanOr}`);
+          keysToRemove.add(`or_51_${cleanOr}`);
+        }
+      }
+    });
+  }
+  if (targetReport?.orNumbers) {
+    targetReport.orNumbers.forEach(or => {
+      if (or) {
+        const cleanOr = String(or).trim();
+        if (targetReport.afNo) {
+          keysToRemove.add(`or_${targetReport.afNo}_${cleanOr}`);
+          keysToRemove.add(`or_${targetReport.afNo.replace(/[^a-zA-Z0-9]/g, '')}_${cleanOr}`);
+        }
+        if (targetReport.collectionType === 'rpt') {
+          keysToRemove.add(`or_A.F. NO. 56_${cleanOr}`);
+          keysToRemove.add(`or_AF56_${cleanOr}`);
+          keysToRemove.add(`or_56_${cleanOr}`);
+        } else if (targetReport.collectionType === 'ctc') {
+          keysToRemove.add(`or_BRF NO. 0016_${cleanOr}`);
+          keysToRemove.add(`or_BRF 0016_${cleanOr}`);
+          keysToRemove.add(`or_0016_${cleanOr}`);
+        } else {
+          keysToRemove.add(`or_A.F. NO. 51_${cleanOr}`);
+          keysToRemove.add(`or_AF51_${cleanOr}`);
+          keysToRemove.add(`or_51_${cleanOr}`);
+        }
+      }
+    });
   }
   const filteredKeys = currentKeys.filter(k => !keysToRemove.has(k));
   localStorage.setItem('rcd_submitted_item_keys', JSON.stringify(filteredKeys));
@@ -2737,26 +3336,74 @@ export const unmarkAdminSubmittedReport = async (
   // 3. Update Supabase
   if (isSupabaseConfigured()) {
     try {
+      // First fetch report from Supabase to ensure we have all itemIds and orNumbers
+      let query = supabase.from('rcd_reports').select('*');
+      if (isValidUuid(reportId)) {
+        query = query.eq('id', reportId);
+      } else if (targetReportNumber) {
+        query = query.eq('report_number', targetReportNumber);
+      } else {
+        query = query.eq('report_number', reportId);
+      }
+      const { data: dbReport } = await query.maybeSingle();
+
+      const dbCols = (dbReport?.collections && typeof dbReport.collections === 'object') ? dbReport.collections : {};
+      const dbItemIds: number[] = Array.isArray(dbCols.itemIds) ? dbCols.itemIds : [];
+      const dbOrNumbers: string[] = Array.isArray(dbCols.orNumbers) ? dbCols.orNumbers : [];
+      const dbStagedRows: any[] = Array.isArray(dbCols.stagedRows) ? dbCols.stagedRows : [];
+
+      // Collect all item IDs to restore to Pending
+      const allItemIds = new Set<number>([
+        ...itemIds,
+        ...(targetReport?.itemIds || []),
+        ...dbItemIds
+      ]);
+      (targetReport?.stagedRows || []).forEach((sr: any) => {
+        (sr.itemIds || []).forEach((id: number) => allItemIds.add(id));
+      });
+      dbStagedRows.forEach((sr: any) => {
+        (sr.itemIds || []).forEach((id: number) => allItemIds.add(id));
+      });
+
+      // Collect all OR numbers to restore to Pending, expanding range strings
+      const rawOrs: string[] = [
+        ...(orNumbers || []),
+        ...(targetReport?.orNumbers || []),
+        ...dbOrNumbers,
+        targetReport?.orRange || '',
+        dbCols?.orRange || ''
+      ];
+      (targetReport?.stagedRows || []).forEach((sr: any) => {
+        (sr.orNumbers || []).forEach((o: string) => { if (o) rawOrs.push(o); });
+        if (sr.orNumbersDisplay) rawOrs.push(sr.orNumbersDisplay);
+      });
+      dbStagedRows.forEach((sr: any) => {
+        (sr.orNumbers || []).forEach((o: string) => { if (o) rawOrs.push(o); });
+        if (sr.orNumbersDisplay) rawOrs.push(sr.orNumbersDisplay);
+      });
+
+      const expandedOrSet = expandOrNumbersSet(rawOrs);
+
+      // 1. Delete from rcd_reports table
       if (isValidUuid(reportId)) {
         await supabase
           .from('rcd_reports')
           .delete()
           .eq('id', reportId);
-      } else if (targetReportNumber) {
+      }
+      if (targetReportNumber) {
         await supabase
           .from('rcd_reports')
           .delete()
           .eq('report_number', targetReportNumber);
+      } else if (!isValidUuid(reportId)) {
+        await supabase
+          .from('rcd_reports')
+          .delete()
+          .eq('report_number', reportId);
       }
 
-      // Collect all item IDs to restore to Pending
-      const allItemIds = new Set(itemIds);
-      if (targetReport?.stagedRows && Array.isArray(targetReport.stagedRows)) {
-        targetReport.stagedRows.forEach((sr: any) => {
-          (sr.itemIds || []).forEach((id: number) => allItemIds.add(id));
-        });
-      }
-
+      // 2. Restore status: 'Pending' in collection tables by ID
       const idList = Array.from(allItemIds);
       if (idList.length > 0) {
         try {
@@ -2765,9 +3412,198 @@ export const unmarkAdminSubmittedReport = async (
         try {
           await supabase.from('rcd_rpt_collections').update({ status: 'Pending' }).in('id', idList);
         } catch {}
+        try {
+          await supabase.from('rcd_community_tax_collections').update({ status: 'Pending' }).in('id', idList);
+        } catch {}
+      }
+
+      // 3. Restore status: 'Pending' in collection tables by OR numbers (expanded)
+      const orList = Array.from(expandedOrSet);
+      if (orList.length > 0) {
+        try {
+          await supabase.from('rcd_collections').update({ status: 'Pending' }).in('or_no', orList);
+        } catch {}
+        try {
+          await supabase.from('rcd_rpt_collections').update({ status: 'Pending' }).in('or_number', orList);
+        } catch {}
+        try {
+          await supabase.from('rcd_community_tax_collections').update({ status: 'Pending' }).in('ctc_no', orList);
+        } catch {}
       }
     } catch (e) {
       console.warn('Error unmarking report in Supabase:', e);
+    }
+  }
+  return true;
+};
+
+export const requestUnarchiveReport = async (reportId: string, requestedBy?: string): Promise<boolean> => {
+  const current: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  
+  let targetReportNumber = '';
+  const updated = current.map(r => {
+    if (r.id === reportId || r.reportNumber === reportId) {
+      targetReportNumber = r.reportNumber;
+      return {
+        ...r,
+        status: 'Pending Admin Approval' as const,
+        unarchiveStatus: 'Pending Admin Approval' as const,
+        unarchiveRequestedBy: requestedBy || 'Collector',
+        unarchiveRequestedAt: new Date().toISOString()
+      };
+    }
+    return r;
+  });
+  
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updated));
+
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabase.from('rcd_reports').select('collections, id, report_number');
+      if (isValidUuid(reportId)) {
+        query = query.eq('id', reportId);
+      } else if (targetReportNumber) {
+        query = query.eq('report_number', targetReportNumber);
+      } else {
+        query = query.eq('report_number', reportId);
+      }
+      const { data } = await query.maybeSingle();
+
+      if (data) {
+        const collectionsPayload = (data.collections && typeof data.collections === 'object') ? data.collections : {};
+        collectionsPayload.unarchiveStatus = 'Pending Admin Approval';
+        collectionsPayload.unarchiveRequestedBy = requestedBy || 'Collector';
+        collectionsPayload.unarchiveRequestedAt = new Date().toISOString();
+
+        await supabase
+          .from('rcd_reports')
+          .update({ 
+            status: 'Pending Admin Approval',
+            collections: collectionsPayload
+          })
+          .eq('id', data.id);
+      }
+    } catch (e) {
+      console.warn('Error updating unarchive request in Supabase:', e);
+    }
+  }
+
+  return true;
+};
+
+export const approveUnarchiveReport = async (reportId: string): Promise<boolean> => {
+  let reportToUnmark: AdminSubmittedReportRecord | null = null;
+  
+  // 1. Try fetching from Supabase first
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabase.from('rcd_reports').select('*');
+      if (isValidUuid(reportId)) {
+        query = query.eq('id', reportId);
+      } else {
+        query = query.eq('report_number', reportId);
+      }
+      const { data } = await query.maybeSingle();
+      if (data) {
+        const colData = (data.collections && typeof data.collections === 'object') ? data.collections : {};
+        reportToUnmark = {
+          id: data.id,
+          reportNumber: data.report_number || reportId,
+          collectorName: data.collector_name || 'Collector',
+          afNo: colData.afNo || 'A.F. NO. 51',
+          orRange: colData.orRange || '',
+          orCount: colData.orCount || 0,
+          orNumbers: Array.isArray(colData.orNumbers) ? colData.orNumbers : [],
+          itemIds: Array.isArray(colData.itemIds) ? colData.itemIds : [],
+          collectionType: colData.collectionType || 'general',
+          totalAmount: parseFloat(data.total_collection || 0),
+          subCategorySummary: colData.subCategories || [],
+          submittedAt: data.created_at || new Date().toISOString(),
+          submittedBy: colData.submittedBy || 'Collector',
+          dateFrom: colData.dateFrom || data.date || '',
+          dateTo: colData.dateTo || data.date || '',
+          status: 'Submitted',
+          stagedRows: colData.stagedRows
+        };
+      }
+    } catch (e) {
+      console.warn('Error fetching remote report for unarchive:', e);
+    }
+  }
+
+  // 2. Fallback to localStorage if not found remotely
+  if (!reportToUnmark) {
+    const current: AdminSubmittedReportRecord[] = JSON.parse(
+      localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+    );
+    reportToUnmark = current.find(r => r.id === reportId || r.reportNumber === reportId) || null;
+  }
+
+  if (reportToUnmark) {
+    await unmarkAdminSubmittedReport(
+      reportToUnmark.id,
+      reportToUnmark.itemIds || [],
+      reportToUnmark.collectionType,
+      reportToUnmark.afNo,
+      reportToUnmark.orNumbers
+    );
+  } else {
+    await unmarkAdminSubmittedReport(reportId, [], 'general');
+  }
+
+  return true;
+};
+
+export const rejectUnarchiveReport = async (reportId: string): Promise<boolean> => {
+  const current: AdminSubmittedReportRecord[] = JSON.parse(
+    localStorage.getItem('rcd_admin_submitted_reports') || '[]'
+  );
+  
+  let targetReportNumber = '';
+  const updated = current.map(r => {
+    if (r.id === reportId || r.reportNumber === reportId) {
+      targetReportNumber = r.reportNumber;
+      return {
+        ...r,
+        status: 'Submitted' as const,
+        unarchiveStatus: 'Rejected' as const,
+        unarchiveRequestedBy: undefined,
+        unarchiveRequestedAt: undefined
+      };
+    }
+    return r;
+  });
+  
+  localStorage.setItem('rcd_admin_submitted_reports', JSON.stringify(updated));
+
+  if (isSupabaseConfigured()) {
+    try {
+      let query = supabase.from('rcd_reports').select('collections, id, report_number');
+      if (isValidUuid(reportId)) {
+        query = query.eq('id', reportId);
+      } else if (targetReportNumber) {
+        query = query.eq('report_number', targetReportNumber);
+      } else {
+        query = query.eq('report_number', reportId);
+      }
+      const { data } = await query.maybeSingle();
+
+      if (data) {
+        const collectionsPayload = (data.collections && typeof data.collections === 'object') ? data.collections : {};
+        collectionsPayload.unarchiveStatus = 'Rejected';
+
+        await supabase
+          .from('rcd_reports')
+          .update({ 
+            status: 'Submitted',
+            collections: collectionsPayload
+          })
+          .eq('id', data.id);
+      }
+    } catch (e) {
+      console.warn('Error rejecting unarchive in Supabase:', e);
     }
   }
 
@@ -2798,15 +3634,22 @@ export type BankDepositInput = Omit<BankDepositRecord, 'id' | 'createdAt' | 'upd
 };
 
 export const getBankDeposits = async (): Promise<BankDepositRecord[]> => {
+  let remoteRecords: BankDepositRecord[] = [];
+  let fetchedRemoteSuccess = false;
+
   if (isSupabaseConfigured()) {
     try {
-      const { data, error } = await supabase
-        .from('rcd_bank_deposits')
-        .select('*')
-        .order('deposit_date', { ascending: false });
+      const data = await fetchAllRows(async (from, to) => {
+        return await supabase
+          .from('rcd_bank_deposits')
+          .select('*')
+          .order('deposit_date', { ascending: false })
+          .range(from, to);
+      });
 
-      if (!error && data) {
-        const records: BankDepositRecord[] = data.map((row: any) => ({
+      if (data) {
+        fetchedRemoteSuccess = true;
+        remoteRecords = data.map((row: any) => ({
           id: row.id,
           depositDate: row.deposit_date,
           depositControlNumber: row.deposit_control_number || row.reference_number || '',
@@ -2818,21 +3661,19 @@ export const getBankDeposits = async (): Promise<BankDepositRecord[]> => {
           createdAt: row.created_at,
           updatedAt: row.updated_at,
         }));
-        try {
-          localStorage.setItem('rcd_bank_deposits', JSON.stringify(records));
-        } catch {}
-        return records;
       }
     } catch (e) {
       console.warn('Error fetching bank deposits from Supabase:', e);
     }
   }
 
+  // Get locally stored deposits
+  let localStored: BankDepositRecord[] = [];
   const stored = localStorage.getItem('rcd_bank_deposits');
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
-      return parsed.map((row: any) => ({
+      localStored = parsed.map((row: any) => ({
         id: row.id,
         depositDate: row.depositDate || row.deposit_date,
         depositControlNumber: row.depositControlNumber || row.referenceNumber || row.deposit_control_number || '',
@@ -2847,7 +3688,33 @@ export const getBankDeposits = async (): Promise<BankDepositRecord[]> => {
     } catch {}
   }
 
-  return [];
+  if (!fetchedRemoteSuccess) {
+    return localStored;
+  }
+
+  // Merge remote records with localStored records to prevent locally added records from disappearing
+  const mergedMap = new Map<string, BankDepositRecord>();
+
+  remoteRecords.forEach(r => {
+    mergedMap.set(r.id, r);
+  });
+
+  localStored.forEach(l => {
+    const existsInRemote = Array.from(mergedMap.values()).some(r =>
+      r.id === l.id || (r.depositControlNumber && r.depositControlNumber.trim().toLowerCase() === l.depositControlNumber?.trim().toLowerCase())
+    );
+    if (!existsInRemote) {
+      mergedMap.set(l.id, l);
+    }
+  });
+
+  const mergedList = Array.from(mergedMap.values()).sort((a, b) => b.depositDate.localeCompare(a.depositDate));
+
+  try {
+    localStorage.setItem('rcd_bank_deposits', JSON.stringify(mergedList));
+  } catch {}
+
+  return mergedList;
 };
 
 export const saveBankDeposit = async (deposit: BankDepositInput): Promise<BankDepositRecord | null> => {
@@ -2869,7 +3736,8 @@ export const saveBankDeposit = async (deposit: BankDepositInput): Promise<BankDe
 
   if (isSupabaseConfigured()) {
     try {
-      if (deposit.id) {
+      const isUuid = deposit.id && isValidUuid(deposit.id);
+      if (isUuid) {
         const { data, error } = await supabase
           .from('rcd_bank_deposits')
           .update(payload)
@@ -2890,6 +3758,8 @@ export const saveBankDeposit = async (deposit: BankDepositInput): Promise<BankDe
             createdAt: data.created_at,
             updatedAt: data.updated_at,
           };
+        } else if (error) {
+          console.error('Error updating bank deposit in Supabase:', error);
         }
       } else {
         payload.created_at = new Date().toISOString();
@@ -2912,6 +3782,8 @@ export const saveBankDeposit = async (deposit: BankDepositInput): Promise<BankDe
             createdAt: data.created_at,
             updatedAt: data.updated_at,
           };
+        } else if (error) {
+          console.error('Error inserting bank deposit to Supabase:', error);
         }
       }
     } catch (e) {
@@ -2935,16 +3807,24 @@ export const saveBankDeposit = async (deposit: BankDepositInput): Promise<BankDe
     };
   }
 
-  const current = await getBankDeposits();
-  const existingIdx = current.findIndex(d => d.id === savedRecord!.id);
+  // Update local storage directly
+  let currentLocal: BankDepositRecord[] = [];
+  try {
+    const stored = localStorage.getItem('rcd_bank_deposits');
+    if (stored) currentLocal = JSON.parse(stored);
+  } catch {}
+
+  const existingIdx = currentLocal.findIndex(d => d.id === savedRecord!.id || (deposit.id && d.id === deposit.id));
   let updated: BankDepositRecord[];
   if (existingIdx >= 0) {
-    updated = [...current];
+    updated = [...currentLocal];
     updated[existingIdx] = savedRecord;
   } else {
-    updated = [savedRecord, ...current];
+    updated = [savedRecord, ...currentLocal];
   }
-  localStorage.setItem('rcd_bank_deposits', JSON.stringify(updated));
+  try {
+    localStorage.setItem('rcd_bank_deposits', JSON.stringify(updated));
+  } catch {}
 
   return savedRecord;
 };
@@ -3000,7 +3880,7 @@ export const unmarkBankDeposits = async (reportId: string): Promise<boolean> => 
 };
 
 export const deleteBankDeposit = async (id: string): Promise<boolean> => {
-  if (isSupabaseConfigured()) {
+  if (isSupabaseConfigured() && isValidUuid(id)) {
     try {
       await supabase
         .from('rcd_bank_deposits')
@@ -3011,9 +3891,15 @@ export const deleteBankDeposit = async (id: string): Promise<boolean> => {
     }
   }
 
-  const current = await getBankDeposits();
-  const filtered = current.filter(d => d.id !== id);
-  localStorage.setItem('rcd_bank_deposits', JSON.stringify(filtered));
+  let currentLocal: BankDepositRecord[] = [];
+  try {
+    const stored = localStorage.getItem('rcd_bank_deposits');
+    if (stored) currentLocal = JSON.parse(stored);
+  } catch {}
+  const filtered = currentLocal.filter(d => d.id !== id);
+  try {
+    localStorage.setItem('rcd_bank_deposits', JSON.stringify(filtered));
+  } catch {}
   return true;
 };
 

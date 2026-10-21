@@ -69,6 +69,7 @@ import { Notification } from '../components/Notification';
 import { useAuth } from '../context/useAuth';
 import { 
   getAccountCodes, 
+  saveAccountCode,
   getCollectionEntries, 
   saveCollectionEntryBulk, 
   deleteCollectionGroup,
@@ -234,6 +235,17 @@ export const CollectionReportPage: React.FC = () => {
     amount: string;
   }>>([{ subCategory: '', mainCategory: '', accountCode: '', amount: '' }]);
   const [saveAttempted, setSaveAttempted] = useState(false);
+
+  // Unregistered SubCategory Prompt & Account Code Creation State
+  const [promptUnregisteredSubCategory, setPromptUnregisteredSubCategory] = useState<string>('');
+  const [confirmAddAccountCodeOpen, setConfirmAddAccountCodeOpen] = useState<boolean>(false);
+  const [addAccountCodeModalOpen, setAddAccountCodeModalOpen] = useState<boolean>(false);
+  const [newAccountCodeForm, setNewAccountCodeForm] = useState({
+    mainCategory: '',
+    subCategory: '',
+    code: ''
+  });
+  const [savingNewAccountCode, setSavingNewAccountCode] = useState<boolean>(false);
 
   const handleCloseNotification = () => {
     setNotification(prev => ({ ...prev, open: false }));
@@ -692,21 +704,8 @@ export const CollectionReportPage: React.FC = () => {
   // Autocomplete options
   const uniqueAfNos = useMemo(() => Array.from(new Set(items.map(i => i.afNo).filter(Boolean))).sort(), [items]);
   const subCategories = useMemo(() => Array.from(new Set(accountCodes.map(c => c.subCategory))).filter(Boolean).sort(), [accountCodes]);
-  const mainCategories = useMemo(() => Array.from(new Set(accountCodes.map(c => c.mainCategory))).filter(Boolean).sort(), [accountCodes]);
-  const allAccountCodes = useMemo(() => Array.from(new Set(accountCodes.map(c => c.code))).filter(Boolean).sort(), [accountCodes]);
+  const uniqueMainCategories = useMemo(() => Array.from(new Set(accountCodes.map(c => c.mainCategory))).filter(Boolean).sort(), [accountCodes]);
   const uniquePayors = useMemo(() => Array.from(new Set(items.map(i => i.payor).filter(Boolean))).sort(), [items]);
-
-  const accountCodeOptionsBySub = useMemo(() => {
-    const map = new Map<string, string[]>();
-    accountCodes.forEach(ac => {
-      const existing = map.get(ac.subCategory) || [];
-      if (ac.code && !existing.includes(ac.code)) {
-        existing.push(ac.code);
-      }
-      map.set(ac.subCategory, existing);
-    });
-    return map;
-  }, [accountCodes]);
 
   const filteredItems = useMemo(() => {
     return items.filter(item => {
@@ -854,6 +853,66 @@ export const CollectionReportPage: React.FC = () => {
     }
   };
 
+  const handleSaveNewAccountCode = async () => {
+    if (!newAccountCodeForm.subCategory.trim() || !newAccountCodeForm.mainCategory.trim() || !newAccountCodeForm.code.trim()) {
+      setNotification({
+        open: true,
+        message: 'Please fill in Sub Category, Main Category, and Account Code.',
+        severity: 'warning'
+      });
+      return;
+    }
+
+    setSavingNewAccountCode(true);
+    try {
+      const success = await saveAccountCode({
+        mainCategory: newAccountCodeForm.mainCategory.trim(),
+        subCategory: newAccountCodeForm.subCategory.trim(),
+        code: newAccountCodeForm.code.trim()
+      });
+
+      if (success) {
+        const updatedCodes = await getAccountCodes();
+        setAccountCodes(updatedCodes);
+
+        // Auto-update any charge line in current form matching this sub category
+        setCharges(prev => prev.map(ch => {
+          if (ch.subCategory.trim().toLowerCase() === newAccountCodeForm.subCategory.trim().toLowerCase()) {
+            return {
+              ...ch,
+              subCategory: newAccountCodeForm.subCategory.trim(),
+              mainCategory: newAccountCodeForm.mainCategory.trim(),
+              accountCode: newAccountCodeForm.code.trim()
+            };
+          }
+          return ch;
+        }));
+
+        setNotification({
+          open: true,
+          message: `Account Code for "${newAccountCodeForm.subCategory.trim()}" saved successfully!`,
+          severity: 'success'
+        });
+        setAddAccountCodeModalOpen(false);
+      } else {
+        setNotification({
+          open: true,
+          message: 'Failed to save account code. Please try again.',
+          severity: 'error'
+        });
+      }
+    } catch (err) {
+      console.error('Error saving account code:', err);
+      setNotification({
+        open: true,
+        message: 'An error occurred while saving account code.',
+        severity: 'error'
+      });
+    } finally {
+      setSavingNewAccountCode(false);
+    }
+  };
+
   const addItem = async () => {
     const header = form;
 
@@ -900,6 +959,18 @@ export const CollectionReportPage: React.FC = () => {
         message: 'Cannot save: Please select a Main Category and Account Code for all charge items.',
         severity: 'warning'
       });
+      return;
+    }
+
+    // Do not allow sub category that is not in account codes
+    const unregisteredCharge = preparedCharges.find(c => {
+      if (!c.subCategory) return false;
+      return !accountCodes.some(ac => ac.subCategory.trim().toLowerCase() === c.subCategory.trim().toLowerCase());
+    });
+
+    if (unregisteredCharge) {
+      setPromptUnregisteredSubCategory(unregisteredCharge.subCategory);
+      setConfirmAddAccountCodeOpen(true);
       return;
     }
 
@@ -1025,10 +1096,52 @@ export const CollectionReportPage: React.FC = () => {
   return (
     <Box sx={{ width: '100%', pb: 4 }}>
       <Backdrop
-        sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 2 }}
+        sx={{
+          color: '#fff',
+          zIndex: (theme) => theme.zIndex.drawer + 2,
+          backdropFilter: 'blur(6px)',
+          backgroundColor: 'rgba(15, 23, 42, 0.5)'
+        }}
         open={loading}
       >
-        <CircularProgress color="inherit" />
+        <Paper
+          elevation={12}
+          sx={{
+            p: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            borderRadius: 3,
+            background: 'rgba(255, 255, 255, 0.95)',
+            border: '1px solid rgba(226, 232, 240, 0.8)',
+            maxWidth: 360,
+            textAlign: 'center'
+          }}
+        >
+          <Box sx={{ position: 'relative', display: 'inline-flex', mb: 2 }}>
+            <CircularProgress size={56} thickness={4} sx={{ color: '#2563eb' }} />
+            <Box
+              sx={{
+                top: 0,
+                left: 0,
+                bottom: 0,
+                right: 0,
+                position: 'absolute',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Refresh sx={{ fontSize: 22, color: '#3b82f6', animation: 'spin 2s linear infinite', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />
+            </Box>
+          </Box>
+          <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mb: 0.5 }}>
+            Loading Collections
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#64748b' }}>
+            Synchronizing data with Supabase...
+          </Typography>
+        </Paper>
       </Backdrop>
 
       <Notification
@@ -1058,10 +1171,10 @@ export const CollectionReportPage: React.FC = () => {
       />
 
       {/* Top Header */}
-      <Box sx={{ mb: 3.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Typography variant="h4" component="h2" fontWeight="800" sx={{ color: '#0f172a' }}>
+            <Typography variant="h5" component="h2" fontWeight="800" sx={{ color: '#0f172a' }}>
               Collections
             </Typography>
             <Chip 
@@ -1070,7 +1183,7 @@ export const CollectionReportPage: React.FC = () => {
               sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0284c7', border: '1px solid rgba(14, 165, 233, 0.3)' }} 
             />
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.2, fontSize: '0.82rem' }}>
             {isAdmin 
               ? "Auditing and monitoring consolidated collection line items encoded across all revenue collectors." 
               : "Manage your daily revenue collection line items or import from Excel."}
@@ -1374,13 +1487,6 @@ export const CollectionReportPage: React.FC = () => {
 
               <Stack spacing={1.5}>
                 {charges.map((c, idx) => {
-                  const subVal = c.subCategory;
-                  const codesForSub = accountCodeOptionsBySub.get(subVal) || [];
-                  const codesForMain = c.mainCategory 
-                    ? Array.from(new Set(accountCodes.filter(ac => ac.mainCategory === c.mainCategory).map(ac => ac.code))).filter(Boolean).sort() 
-                    : [];
-                  const availableCodes = codesForSub.length > 0 ? codesForSub : (codesForMain.length > 0 ? codesForMain : allAccountCodes);
-
                   return (
                     <Paper 
                       key={idx} 
@@ -1408,8 +1514,8 @@ export const CollectionReportPage: React.FC = () => {
                               const next = [...charges];
                               next[idx] = {
                                 subCategory: newVal,
-                                mainCategory: match ? match.mainCategory : next[idx].mainCategory,
-                                accountCode: match ? match.code : next[idx].accountCode,
+                                mainCategory: match ? match.mainCategory : (newVal ? next[idx].mainCategory : ''),
+                                accountCode: match ? match.code : (newVal ? next[idx].accountCode : ''),
                                 amount: c.amount
                               };
                               setCharges(next);
@@ -1421,8 +1527,8 @@ export const CollectionReportPage: React.FC = () => {
                               const next = [...charges];
                               next[idx] = {
                                 subCategory: newVal,
-                                mainCategory: match ? match.mainCategory : next[idx].mainCategory,
-                                accountCode: match ? match.code : next[idx].accountCode,
+                                mainCategory: match ? match.mainCategory : (newVal ? next[idx].mainCategory : ''),
+                                accountCode: match ? match.code : (newVal ? next[idx].accountCode : ''),
                                 amount: c.amount
                               };
                               setCharges(next);
@@ -1435,88 +1541,64 @@ export const CollectionReportPage: React.FC = () => {
                                 size="small" 
                                 fullWidth 
                                 inputRef={(el) => (subCategoryRefs.current[idx] = el)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Tab') {
+                                    const inputVal = c.subCategory?.trim() || '';
+                                    if (inputVal) {
+                                      const matched = subCategories.filter(opt => opt.toLowerCase().includes(inputVal.toLowerCase()));
+                                      if (matched.length === 1) {
+                                        const singleMatch = matched[0];
+                                        const match = accountCodes.find(ac => ac.subCategory.toLowerCase() === singleMatch.toLowerCase());
+                                        const next = [...charges];
+                                        next[idx] = {
+                                          subCategory: singleMatch,
+                                          mainCategory: match ? match.mainCategory : (singleMatch ? next[idx].mainCategory : ''),
+                                          accountCode: match ? match.code : (singleMatch ? next[idx].accountCode : ''),
+                                          amount: c.amount
+                                        };
+                                        setCharges(next);
+                                      }
+                                    }
+                                  }
+                                }}
                               />
                             )}
                           />
                         </Grid>
                         <Grid size={{ xs: 6, sm: 3 }}>
-                          <Autocomplete
-                            freeSolo
-                            options={mainCategories}
-                            value={c.mainCategory}
-                            onChange={(_, v) => {
-                              const newVal = v || '';
-                              const next = [...charges];
-                              next[idx] = {
-                                ...next[idx],
-                                mainCategory: newVal
-                              };
-                              setCharges(next);
+                          <TextField 
+                            label="Main Category *" 
+                            variant="outlined" 
+                            size="small" 
+                            fullWidth 
+                            disabled
+                            value={c.mainCategory || ''}
+                            error={saveAttempted && !c.mainCategory?.trim()}
+                            helperText={saveAttempted && !c.mainCategory?.trim() ? 'Required' : undefined}
+                            slotProps={{
+                              input: {
+                                readOnly: true,
+                                sx: { bgcolor: '#f1f5f9' }
+                              }
                             }}
-                            onInputChange={(_, v) => {
-                              const newVal = v;
-                              const next = [...charges];
-                              next[idx] = {
-                                ...next[idx],
-                                mainCategory: newVal
-                              };
-                              setCharges(next);
-                            }}
-                            renderInput={(params) => (
-                              <TextField 
-                                {...params} 
-                                label="Main Category *" 
-                                variant="outlined" 
-                                size="small" 
-                                fullWidth 
-                                error={saveAttempted && !c.mainCategory?.trim()}
-                                helperText={saveAttempted && !c.mainCategory?.trim() ? 'Required' : undefined}
-                              />
-                            )}
                           />
                         </Grid>
                         <Grid size={{ xs: 6, sm: 2 }}>
-                          <Autocomplete
-                            freeSolo
-                            options={availableCodes}
-                            value={c.accountCode}
-                            onChange={(_, v) => {
-                              const newVal = v || '';
-                              const match = accountCodes.find(ac => ac.code.toLowerCase() === newVal.toLowerCase())
-                                         || accountCodes.find(ac => ac.code === newVal);
-                              const next = [...charges];
-                              next[idx] = {
-                                ...next[idx],
-                                accountCode: newVal,
-                                mainCategory: next[idx].mainCategory || (match ? match.mainCategory : ''),
-                                subCategory: next[idx].subCategory || (match ? match.subCategory : '')
-                              };
-                              setCharges(next);
+                          <TextField 
+                            label="Code *" 
+                            variant="outlined" 
+                            size="small" 
+                            fullWidth 
+                            disabled
+                            value={c.accountCode || ''}
+                            error={saveAttempted && !c.accountCode?.trim()}
+                            helperText={saveAttempted && !c.accountCode?.trim() ? 'Required' : undefined}
+                            slotProps={{
+                              input: {
+                                readOnly: true,
+                                sx: { bgcolor: '#f1f5f9' }
+                              }
                             }}
-                            onInputChange={(_, v) => {
-                              const newVal = v;
-                              const match = accountCodes.find(ac => ac.code.toLowerCase() === newVal.toLowerCase())
-                                         || accountCodes.find(ac => ac.code === newVal);
-                              const next = [...charges];
-                              next[idx] = {
-                                ...next[idx],
-                                accountCode: newVal,
-                                mainCategory: next[idx].mainCategory || (match ? match.mainCategory : ''),
-                                subCategory: next[idx].subCategory || (match ? match.subCategory : '')
-                              };
-                              setCharges(next);
-                            }}
-                            renderInput={(params) => (
-                              <TextField 
-                                {...params} 
-                                label="Code *" 
-                                variant="outlined" 
-                                size="small" 
-                                fullWidth 
-                                error={saveAttempted && !c.accountCode?.trim()}
-                                helperText={saveAttempted && !c.accountCode?.trim() ? 'Required' : undefined}
-                              />
-                            )}
                           />
                         </Grid>
                         <Grid size={{ xs: 10, sm: 2 }}>
@@ -2338,6 +2420,97 @@ export const CollectionReportPage: React.FC = () => {
             </Stack>
           )}
         </DialogContent>
+      </Dialog>
+
+      {/* Confirm Add Unregistered Sub Category to Account Codes Dialog */}
+      <ConfirmDialog
+        open={confirmAddAccountCodeOpen}
+        onClose={() => setConfirmAddAccountCodeOpen(false)}
+        onConfirm={() => {
+          setConfirmAddAccountCodeOpen(false);
+          setNewAccountCodeForm({
+            subCategory: promptUnregisteredSubCategory,
+            mainCategory: '',
+            code: ''
+          });
+          setAddAccountCodeModalOpen(true);
+        }}
+        title="Sub Category Not Found in Account Codes"
+        message={`The Sub Category "${promptUnregisteredSubCategory}" is not registered in the Account Codes page. Would you like to add it to Account Codes now?`}
+        confirmText="Yes, Add to Account Codes"
+        severity="info"
+      />
+
+      {/* Add New Account Code Dialog */}
+      <Dialog
+        open={addAccountCodeModalOpen}
+        onClose={() => setAddAccountCodeModalOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{ sx: { borderRadius: 2 } }}
+      >
+        <DialogTitle sx={{ bgcolor: '#f0f9ff', color: '#0369a1', p: 2, borderBottom: '1px solid #bae6fd', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          Add New Account Code
+          <IconButton size="small" onClick={() => setAddAccountCodeModalOpen(false)}>
+            <Clear />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ p: 3, pt: 3 }}>
+          <Stack spacing={2.5} sx={{ mt: 1 }}>
+            <TextField
+              label="Sub Category"
+              fullWidth
+              size="small"
+              value={newAccountCodeForm.subCategory}
+              onChange={(e) => setNewAccountCodeForm({ ...newAccountCodeForm, subCategory: e.target.value })}
+              required
+              helperText="The specific tax or collection item name"
+            />
+
+            <Autocomplete
+              freeSolo
+              options={uniqueMainCategories}
+              value={newAccountCodeForm.mainCategory}
+              onChange={(_, v) => setNewAccountCodeForm({ ...newAccountCodeForm, mainCategory: v || '' })}
+              onInputChange={(_, v) => setNewAccountCodeForm({ ...newAccountCodeForm, mainCategory: v })}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Main Category"
+                  size="small"
+                  fullWidth
+                  required
+                  placeholder="e.g. Fines and Penalties- Business Income"
+                />
+              )}
+            />
+
+            <TextField
+              label="Account Code"
+              fullWidth
+              size="small"
+              value={newAccountCodeForm.code}
+              onChange={(e) => setNewAccountCodeForm({ ...newAccountCodeForm, code: e.target.value })}
+              placeholder="e.g. 4-02-02-980"
+              required
+              helperText="COA Accounting Code"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+          <Button onClick={() => setAddAccountCodeModalOpen(false)} sx={{ color: '#64748b' }}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSaveNewAccountCode}
+            disabled={savingNewAccountCode || !newAccountCodeForm.subCategory.trim() || !newAccountCodeForm.mainCategory.trim() || !newAccountCodeForm.code.trim()}
+            startIcon={savingNewAccountCode ? <CircularProgress size={18} color="inherit" /> : <Save />}
+            sx={{ bgcolor: '#0284c7', fontWeight: 700, '&:hover': { bgcolor: '#0369a1' } }}
+          >
+            Save Account Code
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

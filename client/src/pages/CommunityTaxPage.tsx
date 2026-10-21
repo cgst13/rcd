@@ -108,14 +108,41 @@ const getAutoCtcNo = (records: CommunityTaxItem[]): string => {
   return getNextCtcNo(bestCtcNo);
 };
 
-export const getPenaltyRate = (dateStr: string): number => {
-  if (!dateStr) return 0;
-  const parts = dateStr.split('-');
+export const getLocalTodayDate = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const getPenaltyRate = (dateStr?: string): number => {
   let month = 0;
-  if (parts.length >= 2) {
-    month = parseInt(parts[1], 10);
+
+  if (!dateStr || !dateStr.trim()) {
+    // Current month (1-12)
+    month = new Date().getMonth() + 1;
   } else {
-    month = new Date(dateStr).getMonth() + 1;
+    const trimmed = dateStr.trim();
+    // Handle standard YYYY-MM-DD or YYYY-MM (e.g. "2026-03-15", "2026-03")
+    const ymdMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})(?:[-/](\d{1,2}))?/);
+    if (ymdMatch) {
+      month = parseInt(ymdMatch[2], 10);
+    } else {
+      // Handle MM/DD/YYYY or M/D/YYYY
+      const mdyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+      if (mdyMatch) {
+        month = parseInt(mdyMatch[1], 10);
+      } else {
+        const d = new Date(trimmed);
+        if (!isNaN(d.getTime())) {
+          month = d.getMonth() + 1;
+        } else {
+          // Fallback to current month
+          month = new Date().getMonth() + 1;
+        }
+      }
+    }
   }
 
   // January (1) and February (2): No penalty (0%)
@@ -123,12 +150,17 @@ export const getPenaltyRate = (dateStr: string): number => {
     return 0;
   }
 
+  // Cap at December rate (24%) if later month in the year
+  if (month > 12) {
+    month = 12;
+  }
+
   // Penalty is 2% per month of (Basic Community Tax + Additional Community Tax),
   // starting in March (3 months * 2% = 6% penalty).
   return (month * 2) / 100;
 };
 
-export const calculatePenalty = (dateStr: string, basicTax: number, additionalTax: number): number => {
+export const calculatePenalty = (dateStr: string | undefined, basicTax: number, additionalTax: number): number => {
   const rate = getPenaltyRate(dateStr);
   if (rate <= 0) return 0;
   const base = Math.max(0, basicTax) + Math.max(0, additionalTax);
@@ -198,8 +230,43 @@ export const CommunityTaxPage: React.FC = () => {
   // Form State
   const formCardRef = useRef<HTMLDivElement>(null);
   const taxpayerRef = useRef<HTMLInputElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+
+  const focusDateDaySegment = () => {
+    if (dateInputRef.current) {
+      dateInputRef.current.focus();
+      setTimeout(() => {
+        if (dateInputRef.current) {
+          dateInputRef.current.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'ArrowRight',
+              code: 'ArrowRight',
+              keyCode: 39,
+              which: 39,
+              bubbles: true,
+              cancelable: true
+            })
+          );
+        }
+      }, 50);
+    }
+  };
+
+  const handleBreakdownKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+  };
+
+  const initialDateStr = getLocalTodayDate();
+  const initialBasicNum = 5;
+  const initialAddNum = 20;
+  const initialPenNum = calculatePenalty(initialDateStr, initialBasicNum, initialAddNum);
+  const initialTotalStr = (initialBasicNum + initialAddNum + initialPenNum).toFixed(2);
+
   const [formData, setFormData] = useState({
     afNo: 'BRF 0016',
     bookletNo: '',
@@ -210,11 +277,11 @@ export const CommunityTaxPage: React.FC = () => {
     barangay: 'Poblacion',
     address: '',
     basicSalary: '0',
-    basicTax: '5',
-    additionalTax: '20',
-    penalty: '0',
-    amount: '25',
-    date: new Date().toISOString().split('T')[0],
+    basicTax: initialBasicNum.toString(),
+    additionalTax: initialAddNum.toString(),
+    penalty: initialPenNum.toString(),
+    amount: initialTotalStr,
+    date: initialDateStr,
     remarks: ''
   });
 
@@ -252,15 +319,24 @@ export const CommunityTaxPage: React.FC = () => {
     loadData();
   }, []);
 
-  // Update initial CTC number and Booklet number when items load
+  // Update initial CTC number and Booklet number from previous record when items load
   useEffect(() => {
     if (!editingId && !formData.taxpayerName && items.length > 0) {
       const nextNo = getAutoCtcNo(items);
       const latestBooklet = items[0]?.bookletNo || '';
+      const currentDate = formData.date || getLocalTodayDate();
+      const bTax = parseFloat(formData.basicTax || '5');
+      const addTax = parseFloat(formData.additionalTax || '20');
+      const pen = calculatePenalty(currentDate, bTax, addTax);
+      const total = (bTax + addTax + pen).toFixed(2);
+
       setFormData(prev => ({ 
         ...prev, 
         ctcNo: nextNo,
-        bookletNo: prev.bookletNo || latestBooklet
+        bookletNo: prev.bookletNo || latestBooklet,
+        date: currentDate,
+        penalty: pen.toString(),
+        amount: total
       }));
     }
   }, [items, editingId]);
@@ -269,8 +345,24 @@ export const CommunityTaxPage: React.FC = () => {
   const updateFormCalculations = (partial: Partial<typeof formData>) => {
     setFormData(prev => {
       const merged = { ...prev, ...partial };
-      
-      const bTax = parseFloat(merged.basicTax) || 0;
+      const isCancelled = (merged.taxpayerName || '').trim().toUpperCase() === 'CANCELLED';
+
+      if (isCancelled) {
+        return {
+          ...merged,
+          basicSalary: '0',
+          basicTax: '0',
+          additionalTax: '0',
+          penalty: '0',
+          amount: '0'
+        };
+      }
+
+      const wasCancelled = (prev.taxpayerName || '').trim().toUpperCase() === 'CANCELLED';
+      let bTax = parseFloat(merged.basicTax) || 0;
+      if (wasCancelled && bTax === 0 && partial.basicTax === undefined) {
+        bTax = merged.ctcType === 'Corporation' ? 500 : 5;
+      }
       const bSalary = parseFloat(merged.basicSalary) || 0;
 
       // Additional Tax:
@@ -299,6 +391,7 @@ export const CommunityTaxPage: React.FC = () => {
 
       return {
         ...merged,
+        basicTax: bTax.toString(),
         additionalTax: addTax.toString(),
         penalty: pen.toString(),
         amount: total.toString()
@@ -309,12 +402,12 @@ export const CommunityTaxPage: React.FC = () => {
   const handleResetForm = () => {
     const nextNo = getAutoCtcNo(items);
     const latestBooklet = items[0]?.bookletNo || formData.bookletNo || '';
-    const currentDate = new Date().toISOString().split('T')[0];
+    const todayDate = getLocalTodayDate();
     const defaultBasic = '5';
     const defaultGender = 'Male' as const;
     const defaultSalary = '0';
     const defaultAdditional = '20';
-    const pen = calculatePenalty(currentDate, parseFloat(defaultBasic), parseFloat(defaultAdditional));
+    const pen = calculatePenalty(todayDate, parseFloat(defaultBasic), parseFloat(defaultAdditional));
     const total = (parseFloat(defaultBasic) + parseFloat(defaultAdditional) + pen).toFixed(2);
 
     setEditingId(null);
@@ -332,7 +425,7 @@ export const CommunityTaxPage: React.FC = () => {
       additionalTax: defaultAdditional,
       penalty: pen.toString(),
       amount: total,
-      date: currentDate,
+      date: todayDate,
       remarks: ''
     });
   };
@@ -370,6 +463,8 @@ export const CommunityTaxPage: React.FC = () => {
       .replace(/\[Salary:[^\]]+\]/g, '')
       .trim();
 
+    const isCancelled = (item.taxpayerName || '').trim().toUpperCase() === 'CANCELLED';
+
     setFormData({
       afNo: item.afNo || 'BRF 0016',
       bookletNo: item.bookletNo || '',
@@ -379,11 +474,11 @@ export const CommunityTaxPage: React.FC = () => {
       gender: g,
       barangay: item.barangay || 'Poblacion',
       address: item.address || '',
-      basicSalary: sal,
-      basicTax: String(item.basicTax ?? (item.ctcType === 'Corporation' ? 500 : 5)),
-      additionalTax: String(item.additionalTax ?? (g === 'Female' ? 10 : 20)),
-      penalty: String(item.penalty ?? 0),
-      amount: String(item.amount ?? 0),
+      basicSalary: isCancelled ? '0' : sal,
+      basicTax: isCancelled ? '0' : String(item.basicTax ?? (item.ctcType === 'Corporation' ? 500 : 5)),
+      additionalTax: isCancelled ? '0' : String(item.additionalTax ?? (g === 'Female' ? 10 : 20)),
+      penalty: isCancelled ? '0' : String(item.penalty ?? 0),
+      amount: isCancelled ? '0' : String(item.amount ?? 0),
       date: item.date || new Date().toISOString().split('T')[0],
       remarks: cleanRemarks
     });
@@ -403,7 +498,8 @@ export const CommunityTaxPage: React.FC = () => {
       return;
     }
 
-    const totalAmount = parseFloat(formData.amount) || 0;
+    const isCancelled = formData.taxpayerName.trim().toUpperCase() === 'CANCELLED';
+    const totalAmount = isCancelled ? 0 : (parseFloat(formData.amount) || 0);
     if (totalAmount < 0) {
       setNotification({ open: true, message: 'Total amount cannot be negative.', severity: 'warning' });
       return;
@@ -439,10 +535,10 @@ export const CommunityTaxPage: React.FC = () => {
         gender: formData.gender,
         barangay: formData.barangay,
         address: '',
-        basicSalary: parseFloat(formData.basicSalary) || 0,
-        basicTax: parseFloat(formData.basicTax) || 0,
-        additionalTax: parseFloat(formData.additionalTax) || 0,
-        penalty: parseFloat(formData.penalty) || 0,
+        basicSalary: isCancelled ? 0 : (parseFloat(formData.basicSalary) || 0),
+        basicTax: isCancelled ? 0 : (parseFloat(formData.basicTax) || 0),
+        additionalTax: isCancelled ? 0 : (parseFloat(formData.additionalTax) || 0),
+        penalty: isCancelled ? 0 : (parseFloat(formData.penalty) || 0),
         amount: totalAmount,
         date: formData.date,
         remarks: metaRemarks
@@ -458,12 +554,12 @@ export const CommunityTaxPage: React.FC = () => {
         const updatedItems = await loadData();
         const nextCtc = getAutoCtcNo(updatedItems);
         const preservedBooklet = formData.bookletNo.trim();
-        const currentDate = new Date().toISOString().split('T')[0];
+        const activeDate = formData.date || getLocalTodayDate();
         const defaultBasic = '5';
         const defaultGender = 'Male' as const;
         const defaultSalary = '0';
         const defaultAdditional = '20';
-        const pen = calculatePenalty(currentDate, parseFloat(defaultBasic), parseFloat(defaultAdditional));
+        const pen = calculatePenalty(activeDate, parseFloat(defaultBasic), parseFloat(defaultAdditional));
         const total = (parseFloat(defaultBasic) + parseFloat(defaultAdditional) + pen).toFixed(2);
 
         setEditingId(null);
@@ -481,14 +577,14 @@ export const CommunityTaxPage: React.FC = () => {
           additionalTax: defaultAdditional,
           penalty: pen.toString(),
           amount: total,
-          date: currentDate,
+          date: activeDate,
           remarks: ''
         });
 
         setShowForm(true);
 
         setTimeout(() => {
-          taxpayerRef.current?.focus();
+          focusDateDaySegment();
         }, 100);
       } else {
         setNotification({ open: true, message: 'Failed to save entry. Please try again.', severity: 'error' });
@@ -525,6 +621,10 @@ export const CommunityTaxPage: React.FC = () => {
 
   // Excel Template Download
   const handleDownloadTemplate = () => {
+    const currentDateStr = new Date().toISOString().split('T')[0];
+    const pen1 = calculatePenalty(currentDateStr, 5, 20);
+    const pen2 = calculatePenalty(currentDateStr, 5, 180);
+
     const templateData = [
       {
         'Form No': 'BRF 0016',
@@ -536,9 +636,9 @@ export const CommunityTaxPage: React.FC = () => {
         'Basic Salary': 0,
         'Basic Tax': 5,
         'Additional Tax': 20,
-        'Penalty': 0,
-        'Total Amount': 25,
-        'Date': new Date().toISOString().split('T')[0],
+        'Penalty': pen1,
+        'Total Amount': 5 + 20 + pen1,
+        'Date': currentDateStr,
         'Remarks': 'Self-employed / Farmer'
       },
       {
@@ -551,9 +651,9 @@ export const CommunityTaxPage: React.FC = () => {
         'Basic Salary': 15000,
         'Basic Tax': 5,
         'Additional Tax': 180,
-        'Penalty': 0,
-        'Total Amount': 185,
-        'Date': new Date().toISOString().split('T')[0],
+        'Penalty': pen2,
+        'Total Amount': 5 + 180 + pen2,
+        'Date': currentDateStr,
         'Remarks': 'Employed at School'
       }
     ];
@@ -602,11 +702,11 @@ export const CommunityTaxPage: React.FC = () => {
           const ctcType: 'Individual' | 'Corporation' = rawType.toLowerCase().includes('corp') ? 'Corporation' : 'Individual';
           const rawGender = String(row['Gender'] || row['Sex'] || '').trim();
           const gender: 'Male' | 'Female' = rawGender.toLowerCase().startsWith('f') ? 'Female' : 'Male';
-          const basicSalary = parseFloat(row['Basic Salary'] || row['Salary'] || 0) || 0;
-          const b = parseFloat(row['Basic Tax'] || row['Basic'] || (ctcType === 'Corporation' ? 500 : 5)) || 0;
-          const a = parseFloat(row['Additional Tax'] || row['Additional'] || (gender === 'Female' ? 10 : 20)) || 0;
-          const p = parseFloat(row['Penalty'] || row['Interest'] || 0) || 0;
-          const total = parseFloat(row['Total Amount'] || row['Amount'] || (b + a + p)) || (b + a + p);
+          const taxpayerName = String(row['Taxpayer Name'] || row['Payor'] || row['Name'] || '').trim().toUpperCase();
+          const isCancelled = taxpayerName === 'CANCELLED';
+          const basicSalary = isCancelled ? 0 : (parseFloat(row['Basic Salary'] || row['Salary'] || 0) || 0);
+          const b = isCancelled ? 0 : (parseFloat(row['Basic Tax'] || row['Basic'] || (ctcType === 'Corporation' ? 500 : 5)) || 0);
+          const a = isCancelled ? 0 : (parseFloat(row['Additional Tax'] || row['Additional'] || (gender === 'Female' ? 10 : 20)) || 0);
 
           let dateStr = new Date().toISOString().split('T')[0];
           if (row['Date']) {
@@ -617,11 +717,25 @@ export const CommunityTaxPage: React.FC = () => {
             }
           }
 
+          const rawPen = row['Penalty'] !== undefined && row['Penalty'] !== ''
+            ? parseFloat(row['Penalty'])
+            : (row['Interest'] !== undefined && row['Interest'] !== '' ? parseFloat(row['Interest']) : NaN);
+
+          const p = isCancelled
+            ? 0
+            : (!isNaN(rawPen) && rawPen > 0
+                ? rawPen
+                : calculatePenalty(dateStr, b, a));
+
+          const total = isCancelled
+            ? 0
+            : (parseFloat(row['Total Amount'] || row['Amount'] || 0) || parseFloat((b + a + p).toFixed(2)));
+
           return {
             afNo: String(row['Form No'] || row['AF No'] || 'BRF 0016').trim(),
             bookletNo: String(row['Booklet No'] || row['Booklet Number'] || row['Booklet'] || row['Bk No'] || '').trim(),
             ctcNo: String(row['CTC Number'] || row['CTC No'] || row['Certificate No'] || row['OR Number'] || '').trim(),
-            taxpayerName: String(row['Taxpayer Name'] || row['Payor'] || row['Name'] || '').trim().toUpperCase(),
+            taxpayerName,
             ctcType,
             gender,
             basicSalary,
@@ -887,7 +1001,8 @@ export const CommunityTaxPage: React.FC = () => {
             bgcolor: '#ffffff' 
           }}
         >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, pb: 1.5, borderBottom: '1px solid #f1f5f9' }}>
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5, pb: 1.5, borderBottom: '1px solid #f1f5f9' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
               <Box sx={{ p: 1, bgcolor: '#e0f2fe', color: '#0284c7', borderRadius: 1, display: 'flex' }}>
                 <ReceiptLong fontSize="small" />
@@ -952,6 +1067,7 @@ export const CommunityTaxPage: React.FC = () => {
             </Grid>
             <Grid size={{ xs: 12, sm: 3 }}>
               <TextField
+                inputRef={dateInputRef}
                 label="Date of Issue *"
                 type="date"
                 value={formData.date}
@@ -960,6 +1076,13 @@ export const CommunityTaxPage: React.FC = () => {
                 size="small"
                 InputLabelProps={{ shrink: true }}
                 required
+                helperText={
+                  (() => {
+                    const rate = getPenaltyRate(formData.date);
+                    if (rate <= 0) return 'Jan - Feb: No penalty (0%)';
+                    return `Month rate: ${(rate * 100).toFixed(0)}% penalty`;
+                  })()
+                }
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 3 }}>
@@ -981,7 +1104,7 @@ export const CommunityTaxPage: React.FC = () => {
                 inputRef={taxpayerRef}
                 label="Taxpayer Name *"
                 value={formData.taxpayerName}
-                onChange={(e) => setFormData({ ...formData, taxpayerName: e.target.value })}
+                onChange={(e) => updateFormCalculations({ taxpayerName: e.target.value })}
                 fullWidth
                 size="small"
                 required
@@ -1017,6 +1140,7 @@ export const CommunityTaxPage: React.FC = () => {
                 type="number"
                 value={formData.basicSalary}
                 onChange={(e) => updateFormCalculations({ basicSalary: e.target.value })}
+                onKeyDown={handleBreakdownKeyDown}
                 fullWidth
                 size="small"
                 helperText="If changed: (Salary * 12)/1000"
@@ -1028,6 +1152,7 @@ export const CommunityTaxPage: React.FC = () => {
                 type="number"
                 value={formData.basicTax}
                 onChange={(e) => updateFormCalculations({ basicTax: e.target.value })}
+                onKeyDown={handleBreakdownKeyDown}
                 fullWidth
                 size="small"
                 helperText="₱5 Basic Tax"
@@ -1039,6 +1164,7 @@ export const CommunityTaxPage: React.FC = () => {
                 type="number"
                 value={formData.additionalTax}
                 onChange={(e) => updateFormCalculations({ additionalTax: e.target.value })}
+                onKeyDown={handleBreakdownKeyDown}
                 fullWidth
                 size="small"
                 helperText="Gender base or Salary/1000"
@@ -1050,12 +1176,15 @@ export const CommunityTaxPage: React.FC = () => {
                 type="number"
                 value={formData.penalty}
                 onChange={(e) => updateFormCalculations({ penalty: e.target.value })}
+                onKeyDown={handleBreakdownKeyDown}
                 fullWidth
                 size="small"
                 helperText={
-                  getPenaltyRate(formData.date) > 0
-                    ? `${(getPenaltyRate(formData.date) * 100).toFixed(0)}% (2%/mo starts Mar @ 6%)`
-                    : '0% (No penalty Jan-Feb)'
+                  (() => {
+                    const rate = getPenaltyRate(formData.date);
+                    if (rate <= 0) return '0% (No penalty Jan - Feb)';
+                    return `${(rate * 100).toFixed(0)}% (2%/mo, starts Mar @ 6%)`;
+                  })()
                 }
               />
             </Grid>
@@ -1065,6 +1194,7 @@ export const CommunityTaxPage: React.FC = () => {
                 type="number"
                 value={formData.amount}
                 onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                onKeyDown={handleBreakdownKeyDown}
                 fullWidth
                 size="small"
                 sx={{
@@ -1079,6 +1209,7 @@ export const CommunityTaxPage: React.FC = () => {
                 label="Remarks / Particulars"
                 value={formData.remarks}
                 onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                onKeyDown={handleBreakdownKeyDown}
                 fullWidth
                 size="small"
                 placeholder="e.g. Employed at LGU, Business owner, Farmer"
@@ -1106,6 +1237,7 @@ export const CommunityTaxPage: React.FC = () => {
               </Button>
             </Grid>
           </Grid>
+          </Box>
         </Paper>
       )}
 

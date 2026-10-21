@@ -43,7 +43,7 @@ export const COLLECTION_TYPES = [
 ];
 
 export interface AccountCode {
-  id: number;
+  id?: number;
   mainCategory: string;
   subCategory: string;
   code: string;

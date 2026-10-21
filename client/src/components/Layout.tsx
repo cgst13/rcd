@@ -578,7 +578,7 @@ export const Layout: React.FC = () => {
           transition: 'width 0.25s ease, margin-left 0.25s ease'
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 2, sm: 3 }, minHeight: 64 }}>
+        <Toolbar sx={{ justifyContent: 'space-between', px: { xs: 1.5, sm: 2 }, minHeight: { xs: 48, sm: 52 }, py: 0.5 }}>
           {/* Mobile Menu Icon / Breadcrumbs */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Tooltip title="Toggle Menu">
@@ -710,12 +710,12 @@ export const Layout: React.FC = () => {
         component="main"
         sx={{ 
           flexGrow: 1, 
-          p: { xs: 1.5, sm: 2.5, md: 3 }, 
+          p: { xs: 1, sm: 1.5, md: 2 }, 
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           maxWidth: '100%',
           minHeight: '100vh',
           bgcolor: '#f8fafc',
-          mt: 8,
+          mt: { xs: 6, sm: 6.5 },
           transition: 'width 0.25s ease'
         }}
       >

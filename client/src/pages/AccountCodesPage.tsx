@@ -146,7 +146,7 @@ export const AccountCodesPage: React.FC = () => {
       subCategory: code.subCategory,
       code: code.code
     });
-    setCurrentId(code.id);
+    setCurrentId(code.id ?? null);
     setIsEditing(true);
     setOpen(true);
   };
@@ -184,7 +184,7 @@ export const AccountCodesPage: React.FC = () => {
     try {
       const id = isEditing && currentId !== null 
         ? currentId 
-        : (accountCodes.length > 0 ? Math.max(...accountCodes.map(item => item.id)) + 1 : 1);
+        : (accountCodes.length > 0 ? Math.max(...accountCodes.map(item => item.id || 0)) + 1 : 1);
         
       const codeToSave: AccountCode = {
         id,
@@ -527,7 +527,7 @@ export const AccountCodesPage: React.FC = () => {
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Delete Code" arrow>
-                        <IconButton size="small" color="error" onClick={() => confirmDelete(row.id)}>
+                        <IconButton size="small" color="error" onClick={() => row.id !== undefined && confirmDelete(row.id)}>
                           <Delete fontSize="small" />
                         </IconButton>
                       </Tooltip>

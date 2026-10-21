@@ -994,10 +994,10 @@ export const RPTCollectionPage: React.FC = () => {
       />
 
       {/* Header */}
-      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+      <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Typography variant="h4" component="h1" fontWeight="800" sx={{ color: '#0f172a' }}>
+            <Typography variant="h5" component="h1" fontWeight="800" sx={{ color: '#0f172a' }}>
               RPT Collection
             </Typography>
             <Chip 
@@ -1006,7 +1006,7 @@ export const RPTCollectionPage: React.FC = () => {
               sx={{ fontWeight: 700, bgcolor: '#e0f2fe', color: '#0284c7', border: '1px solid rgba(14, 165, 233, 0.3)', borderRadius: 1 }} 
             />
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.2, fontSize: '0.82rem' }}>
             {isAdmin
               ? "Auditing and monitoring consolidated Real Property Tax (AF 56) receipts across all revenue collectors."
               : "Manage and track Real Property Tax (AF 56) receipts, land payments & bulk Excel imports."}
